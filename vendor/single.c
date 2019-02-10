@@ -1135,9 +1135,11 @@ void render_set_srctable (Render *r, Table *t) {
 
 
 #if 0
+#if 0
 #include "render1.c"
 #else
 #include "render2.c"
+#endif
 #endif
 
 
@@ -2039,11 +2041,20 @@ void lt_dump (Table *t)
 
 
 //Dump all values in a table.
+static const char __lt_tabs[] = 
+	"\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+static const char __lt_spaces[] = 
+	"                                                  "
+	"                                                  "
+; 
+ 
 int __lt_dump ( LiteKv *kv, int i, void *p ) {
 	VPRINT( "kv at __lt_dump: %p", kv );
 	LiteType vt = kv->value.type;
 	int *level = (int *)p;
-	fprintf ( stderr, "[%-5d] %s", i, &"\t\t\t\t\t\t\t\t\t\t"[ 10 - *level ]);
+	//fprintf ( stderr, "[%-5d] %s", i, &"\t\t\t\t\t\t\t\t\t\t"[ 10 - *level ]);
+	fprintf ( stderr, "[%-5d] %s", i, &__lt_spaces[ 100 - *level ]);
+	//fprintf( stderr, "LEVEL: %ld\n", strlen( __lt_spaces ));
 	lt_printindex( kv, *level );
 	*level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
 	return 1;

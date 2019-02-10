@@ -1,27 +1,4 @@
---2019-01-28 13:59:18--  https://www.caribbeanmotorsnc.com/cat_pages/inventory_1.shtml
+--2019-02-09 23:00:54--  https://www.caribbeanmotorsnc.com/cat_pages/inventory_1.shtml
 Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
-Resolving www.caribbeanmotorsnc.com (www.caribbeanmotorsnc.com)... 192.237.234.24
-Connecting to www.caribbeanmotorsnc.com (www.caribbeanmotorsnc.com)|192.237.234.24|:443... connected.
-HTTP request sent, awaiting response... 
-  HTTP/1.1 200 OK
-  Date: Mon, 28 Jan 2019 18:59:14 GMT
-  Server: Apache
-  Vary: User-Agent,Accept-Encoding
-  Accept-Ranges: bytes
-  Cache-Control: max-age=90
-  Expires: Mon, 28 Jan 2019 19:00:14 GMT
-  Strict-Transport-Security: max-age=93900000; includeSubDomains
-  Content-Length: 165703
-  Keep-Alive: timeout=3, max=300
-  Connection: Keep-Alive
-  Content-Type: text/html; charset=UTF-8
-Length: 165703 (162K) [text/html]
-Saving to: 'files/carri.html'
-
-     0K .......... .......... .......... .......... .......... 30%  418K 0s
-    50K .......... .......... .......... .......... .......... 61%  907K 0s
-   100K .......... .......... .......... .......... .......... 92% 52.7M 0s
-   150K .......... .                                          100% 41.9M=0.2s
-
-2019-01-28 13:59:19 (919 KB/s) - 'files/carri.html' saved [165703/165703]
-
+Resolving www.caribbeanmotorsnc.com (www.caribbeanmotorsnc.com)... failed: Temporary failure in name resolution.
+wget: unable to resolve host address 'www.caribbeanmotorsnc.com'

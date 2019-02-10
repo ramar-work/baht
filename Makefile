@@ -1,18 +1,20 @@
 # Makefile for this stupid script
 CC=gcc
-CFLAGS=-Wall -Wno-unused
+CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H
 
 
 # Does order ever really matter?
-go:
-	$(CC) $(CFLAGS) p.c -L. -lgumbo -o pr && ./pr
+go: vendor/single.o
+	$(CC) $(CFLAGS) vendor/single.o main.c -L. -lgumbo -o pr && ./pr
 
 build:
-	$(CC) $(CFLAGS) p.c -L. -lgumbo -o pr 
+	$(CC) $(CFLAGS) main.c -L. -lgumbo -o pr 
 
 echo:
-	echo $(CC) $(CFLAGS) p.c -L. -lgumbo -o pr 
+	echo $(CC) $(CFLAGS) main.c -L. -lgumbo -o pr 
 
 main:
 	$(CC) $(CFLAGS) m.c -o mm
 
+clean:
+	-rm -f *.o vendor/*.o
