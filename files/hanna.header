@@ -1,0 +1,36 @@
+--2019-01-28 13:59:14--  https://www.hannaimports.com/all-inventory/index.htm?internetPrice=1-9999
+Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
+Resolving www.hannaimports.com (www.hannaimports.com)... 96.7.16.69, 2600:1408:9000:497::2c8a, 2600:1408:9000:492::2c8a
+Connecting to www.hannaimports.com (www.hannaimports.com)|96.7.16.69|:443... connected.
+HTTP request sent, awaiting response... 
+  HTTP/1.1 200 OK
+  Server: Apache-Coyote/1.1
+  X-DDC-Arch-Trace: cms_cookie,PostJava,NoCustomMatch,CmsPoolSelector,JavaPoolDRR-la1websol-cms-botpool02,CMSRequestTrace,HttpResponse,CookieSet
+  P3P: "https://secure4.dealer.com/P3P/PolicyReferences.xml", CP="NOI DSP COR DEVa TAIa OUR BUS UNI"
+  Content-Type: text/html;charset=utf-8
+  Vary: user-agent
+  Vary: Accept-Encoding
+  Expires: Mon, 28 Jan 2019 18:59:09 GMT
+  Cache-Control: max-age=0, no-cache, no-store
+  Pragma: no-cache
+  Date: Mon, 28 Jan 2019 18:59:09 GMT
+  Transfer-Encoding:  chunked
+  Connection: keep-alive
+  Connection: Transfer-Encoding
+  Set-Cookie: JSESSIONID=B13B80435210F60F72650B3AEE5F049A; Path=/; HttpOnly
+  Set-Cookie: locale=en_US; Expires=Wed, 27-Feb-2019 18:59:09 GMT; Path=/
+  Set-Cookie: searchHistory=%5B%7B%22types%22%3A%5B1%5D%2C%22internetPrices%22%3A%5B%221%2C9999%22%5D%2C%22timestamp%22%3A1548701949475%7D%5D; Expires=Wed, 27-Feb-2019 18:59:09 GMT; Path=/
+  Set-Cookie: DDC.inventory.view=full; Path=/all-inventory/
+  Set-Cookie: dlVlpViews=1; Path=/
+  Set-Cookie: ddcpoolid=DRR-la1websol-cms-botpool02;Path=/;Expires=Mon, 28-Jan-2019 19:04:09 GMT
+Length: unspecified [text/html]
+Saving to: 'files/hanna.html'
+
+     0K .......... .......... .......... .......... .......... 1.65M
+    50K .......... .......... .......... .......... .......... 1.14M
+   100K .......... .......... .......... .......... .......... 2.52M
+   150K .......... .......... .......... .......... .......... 5.76M
+   200K .......... .......... ...                              2.63M=0.1s
+
+2019-01-28 13:59:15 (2.00 MB/s) - 'files/hanna.html' saved [229325]
+

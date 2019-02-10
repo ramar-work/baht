@@ -1,0 +1,17 @@
+--2019-01-28 13:59:15--  https://capitalford.com/vehicles?filter
+Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
+Resolving capitalford.com (capitalford.com)... 54.86.62.197, 54.84.47.174, 54.172.13.74
+Connecting to capitalford.com (capitalford.com)|54.86.62.197|:443... connected.
+HTTP request sent, awaiting response... No data received.
+Retrying.
+
+--2019-01-28 13:59:16--  (try: 2)  https://capitalford.com/vehicles?filter
+Connecting to capitalford.com (capitalford.com)|54.86.62.197|:443... connected.
+HTTP request sent, awaiting response... No data received.
+Retrying.
+
+--2019-01-28 13:59:18--  (try: 3)  https://capitalford.com/vehicles?filter
+Connecting to capitalford.com (capitalford.com)|54.86.62.197|:443... connected.
+HTTP request sent, awaiting response... No data received.
+Giving up.
+

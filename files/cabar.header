@@ -1,0 +1,24 @@
+--2019-01-28 13:59:19--  https://cabarruscountycars.com/inventory/search
+Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
+Resolving cabarruscountycars.com (cabarruscountycars.com)... 128.136.135.132
+Connecting to cabarruscountycars.com (cabarruscountycars.com)|128.136.135.132|:443... connected.
+HTTP request sent, awaiting response... 
+  HTTP/1.1 200 OK
+  Server: nginx
+  Date: Mon, 28 Jan 2019 18:59:14 GMT
+  Content-Type: text/html; charset=utf-8
+  Content-Length: 274189
+  Connection: keep-alive
+  Cache-Control: max-age=14400
+Length: 274189 (268K) [text/html]
+Saving to: 'files/cabar.html'
+
+     0K .......... .......... .......... .......... .......... 18% 1.23M 0s
+    50K .......... .......... .......... .......... .......... 37% 1.00M 0s
+   100K .......... .......... .......... .......... .......... 56%  999K 0s
+   150K .......... .......... .......... .......... .......... 74% 1.03M 0s
+   200K .......... .......... .......... .......... .......... 93% 1.11M 0s
+   250K .......... .......                                    100%  589K=0.3s
+
+2019-01-28 13:59:19 (1.01 MB/s) - 'files/cabar.html' saved [274189/274189]
+
