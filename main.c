@@ -93,6 +93,7 @@ GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 
 //Return appropriate block
 char *retblock ( GumboNode *node ) {
+
 	char *iname = NULL;
 	//Give me some food for thought on what to do
 	if ( node->type == GUMBO_NODE_DOCUMENT )
@@ -193,12 +194,12 @@ int rr ( GumboNode *node ) {
 	for ( int i=0; i<bc->length; i++ ) {
 		//Set up data
 		GumboNode *n = bc->data[ i ] ;
+		char *itemname = retblock( n );
 
-#if 1
+#if 0
 		//Dump data if needed
 		//TODO: Put some kind of debug flag on this
 		char *type = (char *)print_gumbo_type( n->type );
-		char *itemname = retblock( n );
 		fprintf( stderr, "%06d, %04d, %-10s, %s\n", ++gi, i, type, itemname );
 #endif
 
@@ -211,23 +212,53 @@ int rr ( GumboNode *node ) {
 			//lt_addnullvalue( t, itemname );
 		}
 		else if ( n->type == GUMBO_NODE_TEXT ) {
+			//Clone the node text as a crude solution
+			int cl=0;
+			unsigned char *mm = trim( (unsigned char *)itemname, " \t\r\n", strlen(itemname), &cl );
+			char *buf = malloc( cl + 1 );
+			memset( buf, 0, cl + 1 );
+			memcpy( buf, mm, cl );	
 			//Handle/save the text reference here
-			lt_addtextkey( tt, "innerHTML" );
-			lt_addtextvalue( tt, itemname );
+			lt_addtextkey( tt, "text" );
+			lt_addtextvalue( tt, buf ); 
 			lt_finalize( tt );
-			//lt_descend( t );
+			free( buf );	
 		}
 		else if ( n->type == GUMBO_NODE_ELEMENT ) {
 			GumboVector *gv = &n->v.element.children;
-			if ( !gv->length )
-				0;
-			else {
-				twoSided = 1; //set this here
-				lt_addtextkey( tt, itemname );
+			GumboVector *gattr = &n->v.element.attributes;
+
+			//Should always add this first
+			lt_addtextkey( tt, itemname );
+			lt_descend( tt );
+	
+			//node elements should all have attributes, I need a list of them, then
+			//need them written out
+			if ( gattr->length ) {
+				lt_addtextkey( tt, "attrs" );
 				lt_descend( tt );
-				rr( n );
+				for ( int i=0; i < gattr->length; i++ ) {
+					GumboAttribute *ga = gattr->data[ i ];
+					lt_addtextkey( tt, ga->name );
+					lt_addtextvalue( tt, ga->value );
+					lt_finalize( tt );
+				}
 				lt_ascend( tt );
 			}
+
+#if 0
+			if ( !gv->length ) {
+				lt_addtextkey( tt, "text" );	
+				lt_addtextvalue( tt, "(nothing)" );	
+				lt_finalize( tt );
+			}
+			else {
+#endif
+			if ( gv->length ) {
+				rr( n );
+			}
+
+			lt_ascend( tt );
 		}
 #endif
 	}
@@ -293,6 +324,43 @@ int main() {
 	//TODO: Call this something more clear than rr()
 	int elements = rr( body );
 	lt_dump( tt );
+
+	//grab the root node
+	//*node = lt_valuetypeat( tt, 217 );  
+	//*node = lt_valuetypeat( tt, 217 );  
+
+	//I should be able to query information here getting what I want.
+#if 0	
+	//we would extract keys from here to an ending node of some sort
+	for ( int i=0; i< lengthOfNodeList; i++ ) {
+		
+		//Read each line (of YAML or whatever) into this structure	
+		struct s { char *left, *right; } list = chop_line( *line );
+
+		//find node can handle replacement of hash indices
+		*ref = find_node( node, list->right );
+	
+		//add the value found in the table to the structure 	
+		//a: some difficult struct map scheme
+		db->val = list->left;
+
+		//b: add entries to a database column structure
+		//struct dbRecords { enum record, char *colname, *value; } *db;
+		db = malloc( sizeof( dbRecords ) );
+		*db = { SQL_CHAR, list->left, list->right };
+		db++;
+
+		//c: write to a file ( will probably change often, and could be slow)
+		const char sqlCmd[] = 
+			"INSERT INTO table ( ... ) VALUES (  )"; 
+		char sqlBuf[ ? ] = { 0 };
+		write( fn, sqlCmd, len( sqlCmd ) );	
+		snprintf( sqlBuf, sqlFmt, len( sqlBuf ), ... );
+		write( fn, sqlBuf, len( sqlBuf ) );
+		//open and close of file takes place after...
+
+	}
+#endif
 
 	//Free the Gumbo and Table structures
 	gumbo_destroy_output( &kGumboDefaultOptions, output );

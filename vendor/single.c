@@ -1250,8 +1250,7 @@ static int build_backwards (LiteKv *t, unsigned char *buf, int bs)
 
 
 //Trim things
-unsigned char *lt_trim (uint8_t *msg, char *trim, int len, int *nlen) 
-{
+unsigned char *lt_trim (uint8_t *msg, char *trim, int len, int *nlen) {
 	//Define stuff
 	uint8_t *m = msg;
 	int nl= len;
@@ -2049,11 +2048,11 @@ static const char __lt_spaces[] =
 ; 
  
 int __lt_dump ( LiteKv *kv, int i, void *p ) {
-	VPRINT( "kv at __lt_dump: %p", kv );
+	//VPRINT( "kv at __lt_dump: %p", kv );
 	LiteType vt = kv->value.type;
 	int *level = (int *)p;
 	//fprintf ( stderr, "[%-5d] %s", i, &"\t\t\t\t\t\t\t\t\t\t"[ 10 - *level ]);
-	fprintf ( stderr, "[%-5d] %s", i, &__lt_spaces[ 100 - *level ]);
+	fprintf ( stderr, "[%-5d] (%d) %s", i, *level, &__lt_spaces[ 100 - *level ]);
 	//fprintf( stderr, "LEVEL: %ld\n", strlen( __lt_spaces ));
 	lt_printindex( kv, *level );
 	*level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
