@@ -17,9 +17,17 @@
  * 
  * TODO
  * ----
- * - email when done
- * - stream to db
- * - add options 
+ - email when done
+ - stream to db
+ - add options 
+ - test out hashes against the table with other types of markup
+ - add a way to jump to a specific hash and do the search from there (easiest
+   way is to copy the table)
+	 Table *nt = lt_copybetween( Table tt, int start, int end );  
+	 free( tt );
+ - add the option to read directly from memory (may save time)
+ - add the option to read from hashes from text file (better than recompiling if
+   something goes wrong)
  * ---------------------------------------------- */
 #if 0 
 #include <stdio.h> 
