@@ -1514,7 +1514,7 @@ unsigned int __lt_int;
 //void lt_complex_exec (Table *t, int (*fp)( LiteType t, LiteValue *k, LiteValue *v, void *p ) );
 int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
 int lt_move(Table *t, int dir) ;
-static void lt_printindex (LiteKv *tt, int ind);
+//static void lt_printindex (LiteKv *tt, int ind);
 LiteType lt_rettype( Table *t, int side, int index );
 const char *lt_rettypename( Table *t, int side, int index );
 void lt_lock (Table *t); 

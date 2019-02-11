@@ -1202,18 +1202,15 @@ static const char *lt_polymorph_type_names[] =
 
 
 //Build a string or some other index in reverse
-static int build_backwards (LiteKv *t, unsigned char *buf, int bs)
-{ 
+static int build_backwards (LiteKv *t, unsigned char *buf, int bs) { 
 	//This should return if there is no value...
-	int    size =  0,  
-           mm = bs;
-	LiteKv   *p =  t; 
+	int size =  0, 
+      mm = bs;
+	LiteKv *p =  t; 
 
-	while (p)
-	{
+	while (p) {
 		//This should only run if there is a blob or pKey	
-		if (p->key.type == LITE_INT || p->key.type == LITE_FLT) 
-		{
+		if (p->key.type == LITE_INT || p->key.type == LITE_FLT) {
 			char b[128] = {0};
 			double f = (t->key.type == LITE_FLT) ? p->key.v.vfloat : (double)p->key.v.vint;
 			int a =	snprintf( b, 127, (t->key.type == LITE_FLT) ? "%f" : "%.0f", f);
@@ -1263,8 +1260,7 @@ unsigned char *lt_trim (uint8_t *msg, char *trim, int len, int *nlen) {
 
 
 //Count indices in a table. If index is greater than 1 and the item is a "table", then will return the number of elements in said table
-int lt_counti ( Table *t, int index )
-{
+int lt_counti ( Table *t, int index ) {
 	//Return count of all elements
 	if ( index == -1 )
 		return t->count;
@@ -1293,8 +1289,7 @@ int lt_counti ( Table *t, int index )
 }
 
 
-int lt_countall( Table *t )
-{
+int lt_countall( Table *t ) {
 	return t->count + 1;
 }
 
@@ -1307,8 +1302,7 @@ void lt_clearerror (Table *t)
 
 
 //Return errors as strings
-const char *lt_strerror (Table *t)
-{
+const char *lt_strerror (Table *t) {
 	//Paranoid bounds checking
 	return ( t->error > -1 && t->error < ERR_LT_INDEX_MAX) ? __SingleLibErrors[ t->error ] : NULL; 
 }
@@ -2020,23 +2014,77 @@ void lt_printt (Table *t)
 }
 
 
-#if 0
-//Dump a table
-void lt_dump (Table *t) 
-{
-	int level = 0;	
-	int ct = t->index;
+//Print a set of values at a particular index
+static void lt_printindex (LiteKv *tt, int showkey, int ind) {
+	int w = 0;
+	int maxlen = (showkey) ? 24576 : lt_buflen;
+  char b[maxlen]; 
+	memset(b, 0, maxlen);
+	struct { int t; LiteRecord *r; } items[2] = {
+		{ tt->key.type  , &tt->key.v    },
+		{ tt->value.type, &tt->value.v  } 
+	};
 
-	//Loop through each index
-	for (int i=0; i <= ct; i++) 
-	{
-		LiteType vt = (t->head + i)->value.type;
-		fprintf ( stderr, "[%-5d] %s", i, &"\t\t\t\t\t\t\t\t\t\t"[ 10 - level ]);
-		lt_printindex( t->head + i, level );
-		level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
+	for ( int i=0; i<2; i++ ) {
+		LiteRecord *r = items[i].r; 
+		int t = items[i].t;
+		if ( i ) {
+			memcpy( &b[w], " -> ", 4 );
+			w += 4;
+			/*LITE_NODE is handled in printall*/
+			if (t == LITE_NON)
+				w += snprintf( &b[w], maxlen - w, "%s", "is uninitialized" );
+		#ifdef LITE_NUL
+			else if (t == LITE_NUL)
+				w += snprintf( &b[w], maxlen - w, "is terminator" );
+		#endif
+			else if (t == LITE_USR)
+				w += snprintf( &b[w], maxlen - w, "userdata [address: %p]", r->vusrdata );
+			else if (t == LITE_TBL) {
+				LiteTable *rt = &r->vtable;
+				w += snprintf( &b[w], maxlen - w, 
+					"table [address: %p, ptr: %ld, elements: %d]", (void *)rt, rt->ptr, rt->count );
+			}
+		}
+
+		//TODO: This just got ugly.  Combine the different situations better...
+
+	if ( !i && showkey ) { 
+		if ( t == LITE_TRM )
+			w += snprintf( &b[w], maxlen - w, "%ld", r->vptr );
+		else if ( t == LITE_NON || t == LITE_NUL )
+			w += snprintf( &b[w], maxlen - w, "(null)" );
+		else {
+			w += build_backwards( tt, (unsigned char *)b, maxlen );
+		}
 	}
-}
-#endif
+	else {
+		//I want to see the full key
+		if (t == LITE_FLT || t == LITE_INT)
+			w += snprintf( &b[w], maxlen - w, "%d", r->vint );
+		else if (t == LITE_FLT)
+			w += snprintf( &b[w], maxlen - w, "%f", r->vfloat );
+		else if (t == LITE_TXT)
+			w += snprintf( &b[w], maxlen - w, "%s", r->vchar );
+		else if (t == LITE_TRM)
+			w += snprintf( &b[w], maxlen - w, "%ld", r->vptr );
+		else if (t == LITE_BLB) {
+			LiteBlob *bb = &r->vblob;
+			if ( bb->size < 0 )
+				return;	
+			if ( bb->size > lt_maxbuf )
+				w += snprintf( &b[w], maxlen - w, "is blob (%d bytes)", bb->size);
+			else {
+				memcpy( &b[w], bb->blob, bb->size ); 
+				w += bb->size;
+			}
+		}
+	}
+	}
+
+	write(2, b, w);
+	write(2, "\n", 1);
+}	
 
 
 //Dump all values in a table.
@@ -2046,15 +2094,22 @@ static const char __lt_spaces[] =
 	"                                                  "
 	"                                                  "
 ; 
- 
+
+
+//Dump a table (needs some flags for debugging) 
 int __lt_dump ( LiteKv *kv, int i, void *p ) {
 	//VPRINT( "kv at __lt_dump: %p", kv );
 	LiteType vt = kv->value.type;
 	int *level = (int *)p;
-	//fprintf ( stderr, "[%-5d] %s", i, &"\t\t\t\t\t\t\t\t\t\t"[ 10 - *level ]);
-	fprintf ( stderr, "[%-5d] (%d) %s", i, *level, &__lt_spaces[ 100 - *level ]);
-	//fprintf( stderr, "LEVEL: %ld\n", strlen( __lt_spaces ));
-	lt_printindex( kv, *level );
+	fprintf ( stderr, "[%-5d] (%d) %s", i, *level, &__lt_spaces[ 100 - *level ] );
+	//Controls whether or not I print the entire key 
+	//(remember that hashes are chained)
+	//TODO: Give this flag a specific title and document it
+#if 0
+	lt_printindex( kv, 0, *level );
+#else
+	lt_printindex( kv, 1, *level );
+#endif
 	*level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
 	return 1;
 }
@@ -2075,65 +2130,8 @@ int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) ) {
 	return 1;
 }
 
-//Print a set of values at a particular index
-static void lt_printindex (LiteKv *tt, int ind) {
-	int         w = 0;
-  char b[lt_buflen]; 
-	memset(b, 0, lt_buflen);
-	struct { int t; LiteRecord *r; } items[2] = {
-		{ tt->key.type  , &tt->key.v    },
-		{ tt->value.type, &tt->value.v  } 
-	};
 
-	for ( int i=0; i<2; i++ ) 
-	{
-		LiteRecord *r = items[i].r; 
-		int t = items[i].t;
-		if ( i ) 
-		{
-			memcpy( &b[w], " -> ", 4 );
-			w += 4;
-			/*LITE_NODE is handled in printall*/
-			if (t == LITE_NON)
-				w += snprintf( &b[w], lt_buflen - w, "%s", "is uninitialized" );
-		#ifdef LITE_NUL
-			else if (t == LITE_NUL)
-				w += snprintf( &b[w], lt_buflen - w, "is terminator" );
-		#endif
-			else if (t == LITE_USR)
-				w += snprintf( &b[w], lt_buflen - w, "userdata [address: %p]", r->vusrdata );
-			else if (t == LITE_TBL) 
-			{
-				LiteTable *rt = &r->vtable;
-				w += snprintf( &b[w], lt_buflen - w, 
-					"table [address: %p, ptr: %ld, elements: %d]", (void *)rt, rt->ptr, rt->count );
-			}
-		}
-		if (t == LITE_FLT || t == LITE_INT)
-			w += snprintf( &b[w], lt_buflen - w, "%d", r->vint );
-		else if (t == LITE_FLT)
-			w += snprintf( &b[w], lt_buflen - w, "%f", r->vfloat );
-		else if (t == LITE_TXT)
-			w += snprintf( &b[w], lt_buflen - w, "%s", r->vchar );
-		else if (t == LITE_TRM)
-			w += snprintf( &b[w], lt_buflen - w, "%ld", r->vptr );
-		else if (t == LITE_BLB) 
-		{
-			LiteBlob *bb = &r->vblob;
-			if ( bb->size < 0 )
-				return;	
-			if ( bb->size > lt_maxbuf )
-				w += snprintf( &b[w], lt_buflen - w, "is blob (%d bytes)", bb->size);
-			else {
-				memcpy( &b[w], bb->blob, bb->size ); 
-				w += bb->size;
-			}
-		}
-	}
 
-	write(2, b, w);
-	write(2, "\n", 1);
-}	
 
 // If I pulled things out, ...
 typedef struct TableMeta {

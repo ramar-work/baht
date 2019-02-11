@@ -227,9 +227,29 @@ int rr ( GumboNode *node ) {
 		else if ( n->type == GUMBO_NODE_ELEMENT ) {
 			GumboVector *gv = &n->v.element.children;
 			GumboVector *gattr = &n->v.element.attributes;
+			GumboAttribute *attr = NULL;
+			char item_cname[ 2048 ];
+			int maxlen = sizeof( item_cname ) - 1;
+			memset( item_cname, 0, maxlen ); 
+			char *iname = itemname;
+
+			//This newest change will add an Id or class to a hash
+			if ( gattr->length ) {
+				if ( ( attr = gumbo_get_attribute( gattr, "id" ) ) ) {
+					//fprintf( stderr, "id is: #%s\n", attr->value );	
+					snprintf( item_cname, maxlen, "%s#%s", itemname, attr->value ); 	
+					iname = item_cname;
+				}
+
+				if ( ( attr = gumbo_get_attribute( gattr, "class" ) ) ) {
+					//fprintf( stderr, "class is: .%s\n", attr->value );	
+					snprintf( item_cname, maxlen, "%s^%s", itemname, attr->value ); 	
+					iname = item_cname;
+				}
+			}
 
 			//Should always add this first
-			lt_addtextkey( tt, itemname );
+			lt_addtextkey( tt, iname );
 			lt_descend( tt );
 	
 			//node elements should all have attributes, I need a list of them, then
@@ -315,7 +335,7 @@ int main() {
 	//Allocate a Table
 	Table t;
 	tt = &t;
-	if ( !lt_init( &t, NULL, 50000 ) ) {
+	if ( !lt_init( &t, NULL, 33300 ) ) {
 		fprintf( stderr, PROG ": couldn't allocate table!\n" );
 		return 1;
 	}
@@ -324,6 +344,21 @@ int main() {
 	//TODO: Call this something more clear than rr()
 	int elements = rr( body );
 	lt_dump( tt );
+
+	//Here is a typical node set
+	const char *h[] = {
+		"table^font4 dropdown"
+	 ,"ul#dropdown_items"
+	 ,"td#inventory"
+	 ,"div^content_b"
+	 ,"div^backdrop.div^bottom_a.div^bottom_b.center.table^email_box font7.tbody.tr.td^email_options font7.div#email2.table.tbody.tr.td^font7.img^o-mail m-icon"	
+	};
+
+//fprintf(stderr, "sss: %ld\n", sizeof(h)/sizeof(char*)); exit(0);
+	for ( int i=0; i<sizeof(h)/sizeof(char*); i++ ) {
+		int a = lt_geti( tt, h[ i ] );
+		fprintf(stderr, "@%-5d -> %s\n", a, h[i] );
+	}
 
 	//grab the root node
 	//*node = lt_valuetypeat( tt, 217 );  
