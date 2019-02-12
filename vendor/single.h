@@ -1007,15 +1007,13 @@ union LiteRecord
 };
 
 
-struct LiteValue 
-{
+struct LiteValue {
   LiteType    type;
   LiteRecord  v;
 };
 
 
-struct LiteKv 
-{
+struct LiteKv {
   int hash[LT_MAX_HASH];
   LiteKv *parent;  
   LiteValue key; 
@@ -1515,6 +1513,7 @@ unsigned int __lt_int;
 int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
 int lt_move(Table *t, int dir) ;
 //static void lt_printindex (LiteKv *tt, int ind);
+LiteKv *lt_retkv (Table *t, int index);
 LiteType lt_rettype( Table *t, int side, int index );
 const char *lt_rettypename( Table *t, int side, int index );
 void lt_lock (Table *t); 
@@ -1523,6 +1522,7 @@ LiteKv *lt_next (Table *t);
 LiteKv *lt_current (Table *t);
 void lt_reset (Table *t);
 int lt_set (Table *t, int index);
+int lt_get_raw (Table *t, int index);
 LiteValue *lt_retany (Table *t, int index);
 LiteRecord *lt_ret (Table *t, LiteType type, int index);
 const char *lt_strerror (Table *t);

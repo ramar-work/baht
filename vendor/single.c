@@ -1201,6 +1201,12 @@ static const char *lt_polymorph_type_names[] =
 };
 
 
+//Get full string (using build_backwards) 
+char *lt_get_full_key ( Table *t, int hash, unsigned char *buf, int bs ) {
+	return NULL;
+}
+
+
 //Build a string or some other index in reverse
 static int build_backwards (LiteKv *t, unsigned char *buf, int bs) { 
 	//This should return if there is no value...
@@ -1711,6 +1717,16 @@ int lt_exists (Table *t, int index) {
 }
 
 
+//Return a LiteKv at a certain index
+LiteKv *lt_retkv (Table *t, int index) {
+	if ( index <= -1 || index > t->count ) {
+		t->error = ERR_LT_INVALID_INDEX;
+		return NULL;
+	}
+
+	return (t->head + index); 
+}
+
 
 //Return a LiteRecord matching a certain type at a certain index
 LiteRecord *lt_ret (Table *t, LiteType type, int index) {
@@ -1735,7 +1751,6 @@ LiteRecord *lt_ret (Table *t, LiteType type, int index) {
 
 	return &(t->head + index)->value.v; 
 }
-
 
 
 //Set the current index to another one

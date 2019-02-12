@@ -43,6 +43,42 @@
 #define PROG "p"
 
 
+typedef struct nodeset {
+	int hash;             //Stored hash
+	const char *key;      //Key that the value corresponds to
+	const char *string;   //String
+} NodeSet;
+
+typedef struct nodeblock {
+
+	//The content to digest
+	//const uint8_t *html;
+
+	//The "root element" that encompasses the elements we want to loop through
+	NodeSet rootNode;
+
+	//A possible node to jump to
+	NodeSet jumpNode;
+
+	//A set of elements containing entries
+	NodeSet *loopNodes;
+
+	//Set of tables (each of the nodes, copied)
+	Table *tlist;
+
+} Nodeblock;
+
+
+Nodeblock nodes[] = {
+/*.content = "files/carri.html"*/
+	{ 
+		.rootNode = {.string = "div^backdrop.div^content_a.div^content_b.center"} 
+	 //,.jumpNode = { .string = "div^backdrop.div^content_a.div^content_b.center" } 
+	 ,.jumpNode = {.string = "div^backdrop.div^content_a.div^content_b.center.div^thumb_div" }
+	}
+};
+
+
 //Things we'll use
 static int gi=0;
 const char *gumbo_types[] = {
@@ -295,6 +331,23 @@ int rr ( GumboNode *node ) {
 	return 1;
 }
 
+struct useless_structure {
+	LiteKv *parent;
+	char *key;
+} ParentInfo;
+
+struct listOfStuff {
+	char *listy;
+} KVList;
+
+
+int extract_same ( LiteKv *kv, int i, void *p ) {
+	//The parent should be at a specific address and not change during each new invocation
+	//The FULL key should also be the same (not like the child couldn't, but its less likely)
+	//A data structure can take both of these...
+	return 1;
+}
+
 
 //Much like moving through any other parser...
 int main() {
@@ -353,57 +406,96 @@ int main() {
 	int elements = rr( body );
 	lt_dump( tt );
 
-	//Here is a typical node set
-	const char *h[] = {
-		"table^font4 dropdown"
-	 ,"ul#dropdown_items"
-	 ,"td#inventory"
-	 ,"div^content_b"
-	 ,"div^backdrop.div^bottom_a.div^bottom_b.center.table^email_box font7.tbody.tr.td^email_options font7.div#email2.table.tbody.tr.td^font7.img^o-mail m-icon"	
-	};
 
-//fprintf(stderr, "sss: %ld\n", sizeof(h)/sizeof(char*)); exit(0);
-	for ( int i=0; i<sizeof(h)/sizeof(char*); i++ ) {
-		int a = lt_geti( tt, h[ i ] );
-		fprintf(stderr, "@%-5d -> %s\n", a, h[i] );
-	}
 
-	//grab the root node
-	//*node = lt_valuetypeat( tt, 217 );  
-	//*node = lt_valuetypeat( tt, 217 );  
 
-	//I should be able to query information here getting what I want.
+	//Loop through each of the requested nodes
+	//This will probably look more like:
+	//1. find "mini-root" or "loop" node
+	//2. copy a table from "loop" node (or start node) to an end node
+	//3. stream to database structure or whatever...
+	for ( int i=0; i<sizeof(nodes)/sizeof(NodeSet); i++ ) {
 #if 0	
-	//we would extract keys from here to an ending node of some sort
-	for ( int i=0; i< lengthOfNodeList; i++ ) {
-		
-		//Read each line (of YAML or whatever) into this structure	
+		//1. Read each line (of YAML or whatever) into this structure	
 		struct s { char *left, *right; } list = chop_line( *line );
+		//1a. This could come from a compiled in data structure, but that's not the
+		//best method here...
+#endif
 
-		//find node can handle replacement of hash indices
-		*ref = find_node( node, list->right );
-	
-		//add the value found in the table to the structure 	
-		//a: some difficult struct map scheme
-		db->val = list->left;
+		//References
+		NodeSet *root = &nodes[ i ].rootNode; 
+		NodeSet *jump = &nodes[ i ].jumpNode; 
+		//NodeSet *loop = &nodes[ i ].loopNodes; 
 
-		//b: add entries to a database column structure
+		//2. Second step is to simply find the node
+		if ( ( root->hash = lt_geti( tt, root->string ) ) == -1 ) {
+			fprintf( stderr, PROG ": string '%s' not found.\n", root->string );
+			exit( 0 );
+		}
+		fprintf(stderr, "@%-5d -> %s\n", root->hash, root->string );
+
+		//2A. Jumping basically means that in the root node, there are many elements which we just don't need to worry about.	
+		//In this particular case, I need to find the first thing that matches the jump node, and/or input this myself.
+		//Let's try matching the jump node.
+		if ( ( jump->hash = lt_geti( tt, jump->string ) ) == -1 ) {
+			fprintf( stderr, PROG ": string '%s' not found.\n", jump->string );
+			exit( 0 );
+		}
+		fprintf(stderr, "@%-5d -> %s\n", jump->hash, jump->string );
+		LiteKv *rootkv = lt_retkv( tt, root->hash );
+		fprintf( stderr, "par: %s\n", rootkv->key.v.vchar );		
+
+
+		//ParentInfo pp = { 
+		//lt_exec( tt, ParentInfo, extract_same );
+
+		//Now I know where to start extracting each table, but I don't know:
+		// - where to end
+		// - how many parents are really left
+		//It looks like both of these questions can be answered if I can query my Table structure for where each neighbor is.
+		//
+		//Get a count of how many elements are there
+		//Find all the elements with a matching hash 
+	exit( 0 );
+
+#if 0
+		//3. If no node, then make a note of it... if node exists, start this
+		//4. Extract or Mark the root node
+		//5. read that yaml from here and stream to structure
+		//NOTE: This will make it easy for me to loop through the "inner node" list
+		//and grab each value from the new table.  (and I don't have to re-read
+		//files) 
+		for ( int fi=0; fi<???; fi++ ) {
+			struct s { char *left, *right; } list = chop_line( *line );
+		}
+
+		//6. Find the "loop" node.  
+		//NOTE: A root node will probably have formatted data sitting SOMEWHERE
+		//in it's structure.  It's just a matter of finding that and could be as
+		//simple as some basic math (like rootnode + 7 = my start node)
+		Table *it = lt_copybetween( node, list->right );
+		for ( int nn=0; nn<???; nn++ ) {
+		}
+#endif
+
+#if 0
+		//METHOD A: add entries to a database column structure
 		//struct dbRecords { enum record, char *colname, *value; } *db;
 		db = malloc( sizeof( dbRecords ) );
 		*db = { SQL_CHAR, list->left, list->right };
 		db++;
+#endif
 
-		//c: write to a file ( will probably change often, and could be slow)
-		const char sqlCmd[] = 
-			"INSERT INTO table ( ... ) VALUES (  )"; 
+#if 0
+		//METHOD B: write to a file ( will probably change often, and could be slow)
+		const char sqlCmd[] = "INSERT INTO table ( ... ) VALUES (  )"; 
 		char sqlBuf[ ? ] = { 0 };
 		write( fn, sqlCmd, len( sqlCmd ) );	
 		snprintf( sqlBuf, sqlFmt, len( sqlBuf ), ... );
 		write( fn, sqlBuf, len( sqlBuf ) );
 		//open and close of file takes place after...
-
-	}
 #endif
+	}
 
 	//Free the Gumbo and Table structures
 	gumbo_destroy_output( &kGumboDefaultOptions, output );
