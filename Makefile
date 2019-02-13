@@ -1,23 +1,52 @@
 # Makefile for this stupid script
 CC=gcc
 CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H #-DERRV_H
-# try clang?
 CC=clang
 CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H #-DERRV_H
 NAME=baht
+DBSERVER="localhost"
+DATABASE=ctrial_db
+DBUSER=
+DBPASSWORD=
+SQLBIN=sqlcmd
 
-# Does order ever really matter?
+# go - Build the 'baht' scraper tool
 go: vendor/single.o
 	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME)
 
+# explain - List all the targets and what they do
+explain:
+	@printf 'Available options are:\n'
+	@sed -n '/^#/ { s/# //; 1d; p; }' Makefile | awk -F '-' '{ printf "  %-20s - %s\n", $$1, $$2 }'
+
+# build - generic, useless build target
 build:
 	$(CC) $(CFLAGS) main.c -L. -lgumbo -o $(NAME) 
 
+# echo - test the useless generic build 
 echo:
 	echo $(CC) $(CFLAGS) main.c -L. -lgumbo -o $(NAME) 
 
 main:
 	$(CC) $(CFLAGS) m.c -o mm
 
+# clean - clean up
 clean:
 	-rm -f *.o vendor/*.o
+	-rm -f $(NAME)
+
+# mssql-load - Load SQL to MSSQL db
+mssql-load: SQLBIN=sqlcmd
+mssql-load: DBUSER=SA
+mssql-load: DBPASSWORD=GKbAt68!
+mssql-load:
+	$(SQLBIN) -S $(DBSERVER) -i example.mssql -U $(DBUSER) -P $(DBPASSWORD)
+
+# mysql-load - Load SQL to MySQL db
+mysql-load: SQLBIN=mysql
+mysql-load: DBUSER=root
+mysql-load: DBPASSWORD=""
+mysql-load:
+	$(SQLBIN) -u $(DBUSER) --password=$(DBPASSWORD) < example.mysql
+
+

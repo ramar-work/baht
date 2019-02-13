@@ -50,6 +50,35 @@
 
 #define RERR(...) fprintf( stderr, __VA_ARGS__ ) ? 1 : 1 
 
+#ifndef DEBUG
+ #define DPRINTF( ... )
+#else
+ #define DPRINTF( ... ) \
+	fprintf( stderr, __VA_ARGS__ )
+#endif
+
+#define ADD_ELEMENT( ptr, ptrListSize, eSize, element ) \
+	if ( ptr ) \
+		ptr = realloc( ptr, sizeof( eSize ) * ( ptrListSize + 1 ) ); \
+	else { \
+		ptr = malloc( sizeof( eSize ) ); \
+	} \
+	*(&ptr[ ptrListSize ]) = element; \
+	ptrListSize++;
+
+#define SET_INNER_PROC(p, t, rn, jn, fk) \
+	InnerProc p = { \
+		.parent   = lt_retkv( t, rn ) \
+	 ,.srctable = t \
+	 ,.jump = jn \
+	 ,.key  = fk \
+	 ,.keylen = strlen( fk ) \
+	 ,.tlist = NULL \
+	 ,.tlistLen = 0 \
+	 ,.hlist = NULL \
+	 ,.hlistLen = 0 \
+	}
+
 typedef struct nodeset {
 	int hash;             //Stored hash
 	const char *key;      //Key that the value corresponds to
@@ -92,12 +121,14 @@ Nodeblock nodes[] = {
 typedef struct useless_structure {
 	LiteKv *parent;
 	Table *srctable;
-	char *key;
+	int rootNode;
+	int jumpNode;
 	int jump;
+	char *key;
 	int keylen;
 	int hlistLen;
-	int tlistLen;
 	int *hlist;
+	int tlistLen;
 	Table **tlist;
 	Table *ctable;
 } InnerProc;
@@ -120,28 +151,28 @@ const char *gumbo_types[] = {
 //Hash this somewhere.
 typedef struct { char *k, *v; } yamlList;
 yamlList expected_keys[] = {
- { "model" }
-,{ "year" }
-,{ "make" }
-,{ "engine" }
-,{ "mileage" }
-,{ "transmission" }
-,{ "drivetrain" }
-,{ "abs" }
-,{ "air_conditioning" }
-,{ "carfax" }
-,{ "autocheck" }
-,{ "autotype" }
-,{ "price" }
-,{ "fees" }
-,{ "kbb" }
-,{ "engine" }
-,{ "mpg" }
-,{ "fuel_type" }
-,{ "interior" }
-,{ "exterior" }
-,{ "vin" }
-,{ NULL }
+   { "model" }
+  ,{ "year" }
+  ,{ "make" }
+  ,{ "engine" }
+  ,{ "mileage" }
+  ,{ "transmission" }
+  ,{ "drivetrain" }
+  ,{ "abs" }
+  ,{ "air_conditioning" }
+  ,{ "carfax" }
+  ,{ "autocheck" }
+  ,{ "autotype" }
+  ,{ "price" }
+  ,{ "fees" }
+  ,{ "kbb" }
+  ,{ "engine" }
+  ,{ "mpg" }
+  ,{ "fuel_type" }
+  ,{ "interior" }
+  ,{ "exterior" }
+  ,{ "vin" }
+  ,{ NULL }
 };
 
 
@@ -149,29 +180,66 @@ yamlList expected_keys[] = {
 #define INCLUDE_TESTS
 #ifdef INCLUDE_TESTS 
 //Test nodes
+#ifndef SHORTNAME
+ #define ROOT "div^thumb_div."
+#else
+ #define ROOT ""
+#endif
 yamlList testNodes[] = {
- {              "model", "" }
-,{               "year", "" }
-,{               "make", "" }
-,{             "engine", "" }
-,{            "mileage", "" }
-,{       "transmission", "" }
-,{         "drivetrain", "" }
-,{                "abs", "" }
-,{   "air_conditioning", "" }
-,{             "carfax", "" }
-,{          "autocheck", "" }
-,{           "autotype", "" }
-,{              "price", "" }
-,{               "fees", "" }
-,{                "kbb", "" }
-,{             "engine", "" }
-,{                "mpg", "" }
-,{          "fuel_type", "" }
-,{           "interior", "" }
-,{           "exterior", "" }
-,{                "vin", "" }
+   {              "model", "table^thumb_table_a.tbody.tr.td^thumb_ymm.text" }
+#if 1 
+  ,{               "year", NULL }
+  ,{               "make", NULL }
+  ,{    "individual_page", "table^thumb_table_a.tbody.tr.td^font5 thumb_more_info.a^font6 thumb_more_info_link.attrs.href" }
+  ,{            "mileage", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{       "transmission", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{         "drivetrain", NULL }
+  ,{                "abs", NULL }
+  ,{   "air_conditioning", NULL }
+  ,{             "carfax", NULL }
+  ,{          "autocheck", NULL }
+  ,{           "autotype", NULL }
+  ,{              "price", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{               "fees", NULL }
+  ,{                "kbb", NULL }
+  ,{        "description", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.p^font3 thumb_description_text.text" }
+  ,{             "engine", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{                "mpg", NULL }
+  ,{          "fuel_type", NULL }
+  ,{           "interior", NULL }
+  ,{           "exterior", NULL }
+  ,{                "vin", NULL }
+#endif
+  ,{ NULL }
 };
+
+#if 0
+//A lot of this stuff can be cross checked after the fact...
+yamlList attrNodes[] = {
+   {              "model", "table^thumb_table_a.tbody.tr.td^thumb_ymm.text" }
+#if 1 
+  ,{               "year", "`get_year`" }
+  ,{               "make", "`get_make`" }
+  ,{         "drivetrain", "" }
+  ,{                "abs", "" }
+  ,{   "air_conditioning", "" }
+  ,{             "carfax", "" }
+  ,{          "autocheck", "" }
+  ,{           "autotype", "" }
+  ,{               "fees", "" }
+  ,{                "kbb", "" }
+
+//These things MIGHT be able to be checked after the fact...
+  ,{             "engine", "`get_engine`" } 
+  ,{                "mpg", "`get_mpg`" }
+  ,{          "fuel_type", "" }
+  ,{           "interior", "" }
+  ,{           "exterior", "" }
+  ,{                "vin", "" }
+#endif
+  ,{ NULL }
+};
+#endif
 
 //Test data
 const char *html_1 = "<h1>Hello, World!</h1>";
@@ -339,7 +407,6 @@ char *retblock ( GumboNode *node ) {
 //TODO: Add filter for element count
 int gumbo_to_table ( GumboNode *node, Table *tt ) {
 
-
 	//Loop through the body and create a "Table" 
 	GumboVector *bc = &node->v.element.children;
 	int stat = 0;
@@ -349,13 +416,7 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 		//Set up data
 		GumboNode *n = bc->data[ i ] ;
 		char *itemname = retblock( n );
-
-	#ifdef DEBUG
-		//DEBUG
-		//TODO: Put some kind of debug flag on this
-		char *type = (char *)print_gumbo_type( n->type );
-		fprintf( stderr, "%06d, %04d, %-10s, %s\n", ++gi, i, type, itemname );
-	#endif
+		DPRINTF( "%06d, %04d, %-10s, %s\n", ++gi, i, print_gumbo_type(n->type) , itemname );
 
 		//Handle what to do with the actual node
 		//TODO: Handle GUMBO_NODE_[CDATA,COMMENT,DOCUMENT,WHITESPACE,TEMPLATE]
@@ -440,7 +501,6 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 }
 
 
-
 //Put the raw HTML into a hash table 
 int parse_html ( Table *tt, unsigned char *block, int len ) {
 
@@ -476,11 +536,7 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 	//The FULL key should also be the same (not like the child couldn't, but its less likely)
 	//A data structure can take both of these...
 	InnerProc *pi = (InnerProc *)p;
-
-	#ifdef DEBUG
-	//Super debugging function :)
-	//fprintf( stderr, "@%5d: %p %c= %p\n", i, kv->parent, ( kv->parent == pi->parent ) ? '=' : '!', pi->parent );
-	#endif
+	DPRINTF( "@%5d: %p %c= %p\n", i, kv->parent, ( kv->parent == pi->parent ) ? '=' : '!', pi->parent );
 
 	//Check that parents are the same... 
 	if ( kv->parent && (kv->parent == pi->parent) && (i >= pi->jump) ) {
@@ -490,22 +546,13 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 			return 1;
 		}
 
-		//More debugging
-		//fprintf( stderr, "fk: %s\n", (char *)lt_get_full_key( pi->srctable, i, fkBuf, sizeof(fkBuf) - 1 ) );
-		//fprintf( stderr, "%d ? %ld\n", pi->keylen, strlen( (char *)fkBuf ) ); 
+		DPRINTF( "fk: %s\n", (char *)lt_get_full_key( pi->srctable, i, fkBuf, sizeof(fkBuf) - 1 ) );
+		DPRINTF( "%d ? %ld\n", pi->keylen, strlen( (char *)fkBuf ) ); 
 
 		//Check strings and see if they match? (this is kind of a crude check)
 		if ( pi->keylen == strlen( fkBuf ) && memcmp( pi->key, fkBuf, pi->keylen ) == 0 ) {
 			//save hash here and realloc a stretching int buffer...
-			//	pi->hlist = realloc( pi->hlist, sizeof(int) * (pi->hlistLen + 1) );
-			if ( pi->hlist ) 
-				pi->hlist = realloc( pi->hlist, sizeof(int) * (pi->hlistLen + 1) );
-			else {
-				pi->hlist = malloc( sizeof(int) );
-				*pi->hlist = 0;
-			}
-			*(&pi->hlist[ pi->hlistLen ]) = i;
-			pi->hlistLen++;	
+			ADD_ELEMENT( pi->hlist, pi->hlistLen, int, i );
 		} 
 	}
 	return 1;
@@ -526,10 +573,10 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
 		lt_addintkey( ct, (kt==LITE_INT) ? kv->key.v.vint : kv->key.v.vfloat );	
-	else if ( kt == LITE_TXT )
-		lt_addtextkey( ct, kv->key.v.vchar );	
 	else if ( kt == LITE_BLB )
 		lt_addblobkey( ct, kv->key.v.vblob.blob, kv->key.v.vblob.size );	
+	else if ( kt == LITE_TXT )
+		lt_addtextkey( ct, kv->key.v.vchar );	
 	else if ( kt == LITE_TRM ) {
 		lt_ascend( ct );
 		return 1;
@@ -538,13 +585,15 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Save value 
 	if ( vt == LITE_INT || vt == LITE_FLT ) 
 		lt_addintvalue( ct, kv->value.v.vint );	
-	else if ( vt == LITE_TXT )
-		lt_addtextvalue( ct, kv->value.v.vchar );	
 	else if ( vt == LITE_BLB)
 		lt_addblobvalue( ct, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
+	else if ( vt == LITE_TXT )
+		lt_addtextvalue( ct, kv->value.v.vchar );	
 	else if ( vt == LITE_TBL ) {
 		lt_descend( ct );
+		return 1;
 	}
+	lt_finalize( ct );
 	return 1;
 }
 
@@ -596,8 +645,7 @@ int main() {
 
 	//Create a hash table out of the expected keys.
 	if ( !yamlList_to_table( expected_keys, &tex ) ) {
-		fprintf( stderr, "Faield to create hash list." );
-		return 1;
+		return RERR( PROG ": Failed to create hash list.\n" );
 	}
 
 	//Get source somewhere.
@@ -615,95 +663,97 @@ int main() {
 
 	//Create an HTML hash table
 	if ( !parse_html( tt, block, len ) ) {
-		return 1;
+		return RERR( PROG ": Couldn't parse HTML to hash Table.\n" );
 	}
 
+	//Set some references
+	unsigned char fkbuf[ 2048 ] = { 0 };
+	int rootNode, jumpNode, activeNode;
+	NodeSet *root = &nodes[ 0 ].rootNode,  *jump = &nodes[ 0 ].jumpNode; 
 
-	//Loop through each of the requested nodes
-	//This will probably look more like:
-	for ( int i=0; i<sizeof(nodes)/sizeof(Nodeblock); i++ ) {
+	//Find the root node.
+	if ( ( rootNode = lt_geti( tt, root->string ) ) == -1 ) {
+		return RERR( PROG ": string '%s' not found.\n", root->string );
+	}
 
-		//Set some references
-		unsigned char fkbuf[ 2048 ] = { 0 };
-		NodeSet *root = &nodes[ i ].rootNode; 
-		NodeSet *jump = &nodes[ i ].jumpNode; 
-		//NodeSet *loop = &nodes[ i ].loopNodes; 
-
-		//Find the root node.
-		if ( ( root->hash = lt_geti( tt, root->string ) ) == -1 ) {
-			fprintf( stderr, PROG ": string '%s' not found.\n", root->string );
-			return 1;
+	//Find the "jump" node.
+	if ( !jump->string ) 
+		jumpNode = rootNode;
+	else {
+		if ( ( jumpNode = lt_geti( tt, jump->string ) ) == -1 ) {
+			return RERR( PROG ": jump string '%s' not found.\n", jump->string );
 		}
-		//fprintf(stderr, "@%-5d -> %s\n", root->hash, root->string );
+	}
 
-		//Find the "jump" node.
-		if ( ( jump->hash = lt_geti( tt, jump->string ) ) == -1 ) {
-			fprintf( stderr, PROG ": string '%s' not found.\n", jump->string );
-			exit( 0 );
-		}
-		//fprintf(stderr, "@%-5d -> %s\n", jump->hash, jump->string );
+	//Get parent and do work.
+	char *fkey = (char *)lt_get_full_key( tt, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
+	SET_INNER_PROC(pp, tt, rootNode, jumpNode, fkey );
 
-		//Get parent and do work.
-		char *fkey = (char *)lt_get_full_key( tt, jump->hash, fkbuf, sizeof(fkbuf) - 1 );
-		InnerProc pp = {
-			.parent   = lt_retkv( tt, root->hash )
-		 ,.srctable = tt
-		 ,.jump = jump->hash 
-		 ,.key  = fkey 
-		 ,.keylen = strlen( fkey )
-		 ,.tlist = NULL
-		 ,.tlistLen = 0
-		 ,.hlist = NULL
-		 ,.hlistLen = 0
-		};
+	//Start the extraction process 
+	lt_exec( tt, &pp, extract_same );
+	lt_reset( tt );
 
-		//Start the extraction process 
-		lt_exec( tt, &pp, extract_same );
-		lt_reset( tt );
-
-		//Build individual tables for each.
-		for ( int i=0; i<pp.hlistLen; i++ ) {
-			//TODO: For our purposes, 5743 is the final node.  Fix this.
-			int start, end;
-			start = pp.hlist[ i ];
-			end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
-
-			//TODO: Got to figure out what the issue is here, something having 
-			//to do with lt_init.  Allocate a table (or five)
-			Table *th = malloc( sizeof(Table) );
-			memset( th, 0, sizeof(Table) );
-			lt_init( th, NULL, 7777 );
-
-			//Add space for new table here
-			if ( pp.tlist ) 
-				pp.tlist = realloc( pp.tlist, sizeof(Table *) * ( pp.tlistLen + 1 ) );
-			else {
-				pp.tlist = malloc( sizeof(Table *) );
-			}
+	//Build individual tables for each.
+	for ( int i=0; i<pp.hlistLen; i++ ) {
+		//TODO: For our purposes, 5743 is the final node.  Fix this.
+		int start = pp.hlist[ i ];
+		int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
 		
-			//Set references and pass in to be built	
-			//fprintf( stderr, "list: %d\n", pp.tlistLen );
-			*(&pp.tlist[ pp.tlistLen ]) = th;
-			pp.ctable = pp.tlist[ pp.tlistLen ];
-			pp.tlistLen ++;
+		//TODO: Add 'lt_get_optimal_hash_size( ... )'
+		//int oz = lt_get_optimal_hz( int );
 
-			//Create a new table
-			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
-		}
+		//TODO: Got to figure out what the issue is here, something having 
+		//to do with lt_init.  Allocate a table (or five)
+		Table *th = malloc( sizeof(Table) );
+		lt_init( th, NULL, 7777 );
+		ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
+		pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
 
-		//Destroy the both Gumbo map and source table. 
-		lt_free( tt );
-
-		//Now check that each table has something
-		for ( int i=0; i<pp.tlistLen; i++ ) {
-			lt_dump( pp.tlist[ i ] );
-			//Hash check on dem bi	
-		}
-
+		//Create a new table
+		lt_exec_complex( tt, start, end - 1, &pp, build_individual );
+		lt_lock( pp.ctable );
 	}
 
-	//Finally destroy the hlist	 (should just be one big block)
-	//free( hlist	);  
-	return 0; 
+	//Destroy the source table. 
+	lt_free( tt );
 
+	//Now check that each table has something
+	for ( int i=0; i<pp.tlistLen; i++ ) {
+		Table *tl = pp.tlist[ i ];
+		lt_kdump( tl );
+
+#if 1
+		//Hash check on dem bi	
+		yamlList *tn = testNodes;
+		while ( tn->k ) {
+		#if 0
+			fprintf( stderr, "hash of %s: %d\n", tn->v, lt_geti( tl, tn->v ) );
+		#else
+			//slower, but easier on me...
+			if ( !tn->v )
+				;//fprintf( stderr, "No target value for column %s\n", tn->k );	
+			else {
+				fprintf( stderr, "Finding value for column: %s\n", tn->k );
+				int p;
+				char buf[ 2048 ] = {0};
+				const char *rootShort = "div^thumb_div.";
+				memcpy( buf, rootShort, (p = strlen( rootShort )) );
+				memcpy( &buf[ p ], tn->v, strlen( tn->v ) );
+				fprintf( stderr, "hash of %s: %d\n", buf, lt_geti( tl, buf ) );
+			}
+		#endif
+			tn++;
+		}
+
+		//exit( 0 ); 
+#endif
+	}
+exit( 0 );
+
+	//for ( ... ) free( hashlist );
+	//for ( ... ) free( pp.tlist );
+	//free( pp.hlist );
+	return 0; 
 }
+
+

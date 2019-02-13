@@ -98,11 +98,14 @@ TODO
 
 static const unsigned int lt_hash = 31;
 
-unsigned int __lt_int = 0;
+//unsigned int __lt_int = 0;
+
+LtInner __ltComplex = { LT_DUMP_LONG, LT_VERBOSE, NULL, 0 };
+LtInner __ltHistoric = { LT_DUMP_SHORT, LT_VERBOSE, NULL, 0 };
+LtInner __ltSimple = { LT_DUMP_SHORT, LT_CONDENSED, NULL, 0 };
 
 #ifndef ERR_H
-static const char *__SingleLibErrors[] = 
-{
+static const char *__SingleLibErrors[] = {
   [ERR_NONE] = "No errors",
 
 #ifndef BUFF_H
@@ -2136,9 +2139,9 @@ static const char __lt_tabs[] =
 static const char __lt_spaces[] = 
 	"                                                  "
 	"                                                  "
-; 
-
-
+;
+ 
+#if 0
 //Dump a table (needs some flags for debugging) 
 int __lt_dump ( LiteKv *kv, int i, void *p ) {
 	//VPRINT( "kv at __lt_dump: %p", kv );
@@ -2152,27 +2155,24 @@ int __lt_dump ( LiteKv *kv, int i, void *p ) {
 	lt_printindex( kv, 0, *level );
 #else
 	lt_printindex( kv, 1, *level );
-#endif
+#endif	
 	*level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
 	return 1;
 }
+#endif
 
-#if 0
-//Write a real simple function to iterate through everything
-//void lt_complex_exec (Table *t, int (*fp)( LiteType t, LiteValue *k, LiteValue *v, int i, void *p ) )
-int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) ) {
-	int level = 0;	
 
-	//Loop through each index
-	for (int i=0, status=0; i <= t->index; i++) {
-		//VPRINT( "kv at __lt_dump: %p", (t->head + i ));
-		if ( (status = fp( (t->head + i), i, p )) == 0 ) {
-			return 0;
-		}
+//Dump a table (needs some flags for debugging) 
+int __lt_dump ( LiteKv *kv, int i, void *p ) {
+	LiteType vt = kv->value.type;
+	LtInner *pp = (LtInner *)p; 
+	if ( pp->indextype ) {
+		fprintf ( stderr, "[%-5d] (%d) %s", i, pp->level, &__lt_spaces[ 100 - pp->level ] );
 	}
+	lt_printindex( kv, pp->dumptype, pp->level );
+	pp->level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
 	return 1;
 }
-#endif
 
 
 //A complicated iterator

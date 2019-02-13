@@ -285,7 +285,13 @@ int main (int argc, char *argv[] ) {
  #define lt_exec(t, a, b) \
 	lt_exec_complex( t, 0, t->index, a, b )
  #define lt_dump(t) \
-	lt_exec( t, &__lt_int, __lt_dump )
+	lt_exec( t, &__ltHistoric, __lt_dump )
+ #define lt_kdump(t) \
+	lt_exec( t, &__ltComplex, __lt_dump )
+//	lt_exec( t, &__lt_int, __lt_dump )
+ #define lt_sdump(t) \
+	lt_exec( t, &__ltSimple, __lt_dump )
+//	lt_exec( t, &__lt_int, __lt_dump )
  #define lt_blob_at( t, i ) \
  	lt_ret( t, LITE_BLB, i )->vblob
  #define lt_blobdata_at( t, i ) \
@@ -933,7 +939,12 @@ typedef struct LiteTable LiteTable;
 typedef struct LiteKv LiteKv;
 typedef union  LiteRecord LiteRecord;
 //typedef struct LiteNode LiteNode;
-
+typedef struct { 
+	enum { LT_DUMP_SHORT, LT_DUMP_LONG } dumptype; 
+	enum { LT_CONDENSED, LT_VERBOSE } indextype;
+	const char *customfmt;
+	int level; 
+} LtInner;
 
 //Table for table values
 typedef enum {
@@ -1505,19 +1516,16 @@ void pr_print ( Parser *p );
 
 
 #ifndef TAB_H
-LiteType lt_add (Table *, int, LiteType, int, float, char *,
-  unsigned char *, unsigned int , void *, Table *, char *);
+LiteType lt_add (Table *, int, LiteType, int, float, char *, unsigned char *, unsigned int , void *, Table *, char *);
 Table *lt_init (Table *, LiteKv *, int) ;
 void lt_printall ( Table *t );
 void lt_finalize (Table *t) ;
 int __lt_dump ( LiteKv *kv, int i, void *p );
-unsigned int __lt_int;
-//void lt_dump (Table *t) ;
-//void lt_complex_exec (Table *t, int (*fp)( LiteType t, LiteValue *k, LiteValue *v, void *p ) );
-//int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
+LtInner __ltComplex; 
+LtInner __ltHistoric; 
+LtInner __ltSimple; 
 int lt_exec_complex (Table *t, int start, int end, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
 int lt_move(Table *t, int dir) ;
-//static void lt_printindex (LiteKv *tt, int ind);
 LiteKv *lt_retkv (Table *t, int index);
 LiteType lt_rettype( Table *t, int side, int index );
 const char *lt_rettypename( Table *t, int side, int index );
