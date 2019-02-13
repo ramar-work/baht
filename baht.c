@@ -10,6 +10,10 @@
  * Usage
  * -----
  * tbd
+ *
+ * Flags 
+ * -----
+ * -DDEBUG - Show debugging information 
  * 
  * Author
  * ------
@@ -85,7 +89,6 @@ Nodeblock nodes[] = {
 };
 
 
-
 typedef struct useless_structure {
 	LiteKv *parent;
 	Table *srctable;
@@ -96,7 +99,7 @@ typedef struct useless_structure {
 	int tlistLen;
 	int *hlist;
 	Table **tlist;
-	Table *dtable;
+	Table *ctable;
 } InnerProc;
 
 
@@ -111,6 +114,63 @@ const char *gumbo_types[] = {
 , "comment"
 , "whitespace"
 , "template"
+};
+
+
+//Hash this somewhere.
+typedef struct { char *k, *v; } yamlList;
+yamlList expected_keys[] = {
+ { "model" }
+,{ "year" }
+,{ "make" }
+,{ "engine" }
+,{ "mileage" }
+,{ "transmission" }
+,{ "drivetrain" }
+,{ "abs" }
+,{ "air_conditioning" }
+,{ "carfax" }
+,{ "autocheck" }
+,{ "autotype" }
+,{ "price" }
+,{ "fees" }
+,{ "kbb" }
+,{ "engine" }
+,{ "mpg" }
+,{ "fuel_type" }
+,{ "interior" }
+,{ "exterior" }
+,{ "vin" }
+,{ NULL }
+};
+
+
+
+#define INCLUDE_TESTS
+#ifdef INCLUDE_TESTS 
+//Test nodes
+yamlList testNodes[] = {
+ {              "model", "" }
+,{               "year", "" }
+,{               "make", "" }
+,{             "engine", "" }
+,{            "mileage", "" }
+,{       "transmission", "" }
+,{         "drivetrain", "" }
+,{                "abs", "" }
+,{   "air_conditioning", "" }
+,{             "carfax", "" }
+,{          "autocheck", "" }
+,{           "autotype", "" }
+,{              "price", "" }
+,{               "fees", "" }
+,{                "kbb", "" }
+,{             "engine", "" }
+,{                "mpg", "" }
+,{          "fuel_type", "" }
+,{           "interior", "" }
+,{           "exterior", "" }
+,{                "vin", "" }
 };
 
 //Test data
@@ -130,6 +190,9 @@ const char yamama[] = ""
 	"</body>"
 "</html>"
 ;
+#endif
+
+
 
 
 //Return the type name of a node
@@ -154,6 +217,94 @@ GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 		}
 	}
 	return NULL;
+}
+
+
+//Load a page and write to buffer
+int load_page ( const char *file, unsigned char **dest, int *destlen ) {
+
+	int fn;
+	struct stat sb;
+
+	//Read file to memory
+	if ( stat( file, &sb ) == -1 ) {
+		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		return 0; 
+	}
+
+	//Open the file
+	if ( (fn = open( file, O_RDONLY )) == -1 ) {
+		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		return 0; 
+	}
+
+	//Allocate a buffer big enough to just write to memory.
+	if ( !(*dest = malloc( sb.st_size + 10 )) ) {
+		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		return 0; 
+	}
+
+	//Read the file into buffer	
+	if ( read( fn, *dest, sb.st_size ) == -1 ) {
+		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		return 0; 
+	}
+
+	*destlen = sb.st_size;
+	return 1;
+}
+
+
+//Grab a page and write to buffer
+int load_www ( const char *address, unsigned char *dest, int *destlen ) {
+
+	int fn;
+	struct stat sb;
+
+	//Can make a raw socket connection, but should use cURL for it...
+	//....
+
+#if 0
+	//Read the file into buffer	
+	if ( read( fn, dest, sb.st_size ) == -1 ) {
+		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		return 0; 
+	}
+#endif
+
+	*destlen = 0;
+	return 1;
+}
+
+
+
+//Build table from yamlList
+int yamlList_to_table ( yamlList *list, Table *t ) {
+
+	//TODO: Get a count of elements for efficient hashing
+	if ( !lt_init( t, NULL, 256 ) ) {
+		return 0;
+	}
+
+	//Loop through the list and do some work.
+	//for ( int i=0; i<sizeof(list)/sizeof(yamlList); i++ ) {
+	yamlList *x = list;
+	while ( x->k ) {
+	#if 1
+		lt_addblobkey( t, (uint8_t *)x->k, strlen( x->k ) );
+		lt_addintvalue( t, 1 );
+	#else
+		lt_addttkey( t, x->k );
+		lt_addintvalue( t, 1 );
+	#endif	
+		lt_finalize( t );
+		x++;
+	}
+	
+	//Dump the built hash.
+	//lt_dump( t );
+
+	return 1;
 }
 
 
@@ -182,76 +333,13 @@ char *retblock ( GumboNode *node ) {
 }
 
 
-#if 0
-//Gumbo to Table 
-int lua_to_table (lua_State *L, int index, Table *t ) {
-	static int sd;
-	lua_pushnil( L );
-	obprintf( stderr, "Current stack depth: %d\n", sd++ );
-
-	while ( lua_next( L, index ) != 0 ) 
-	{
-		int kt, vt;
-		obprintf( stderr, "key, value: " );
-
-		//This should pop both keys...
-		obprintf( stderr, "%s, %s\n", lua_typename( L, lua_type(L, -2 )), lua_typename( L, lua_type(L, -1 )));
-
-		//Keys
-		if (( kt = lua_type( L, -2 )) == LUA_TNUMBER )
-			obprintf( stderr, "key: %lld\n", (long long)lua_tointeger( L, -2 ));
-		else if ( kt  == LUA_TSTRING )
-			obprintf( stderr, "key: %s\n", lua_tostring( L, -2 ));
-
-		//Values
-		if (( vt = lua_type( L, -1 )) == LUA_TNUMBER )
-			obprintf( stderr, "val: %lld\n", (long long)lua_tointeger( L, -1 ));
-		else if ( vt  == LUA_TSTRING )
-			obprintf( stderr, "val: %s\n", lua_tostring( L, -1 ));
-
-		//Get key (remember Lua indices always start at 1.  Hence the minus.
-		if (( kt = lua_type( L, -2 )) == LUA_TNUMBER )
-			lt_addintkey( t, lua_tointeger( L, -2 ) - 1);
-		else if ( kt  == LUA_TSTRING )
-			lt_addtextkey( t, (char *)lua_tostring( L, -2 ));
-
-		//Get value
-		if (( vt = lua_type( L, -1 )) == LUA_TNUMBER )
-			lt_addintvalue( t, lua_tointeger( L, -1 ));
-		else if ( vt  == LUA_TSTRING )
-			lt_addtextvalue( t, (char *)lua_tostring( L, -1 ));
-		else if ( vt == LUA_TTABLE )
-		{
-			lt_descend( t );
-			obprintf( stderr, "Descending because value at %d is table...\n", -1 );
-			lua_loop( L );
-			lua_to_table( L, index + 2, t ); 
-			lt_ascend( t );
-			sd--;
-		}
-
-		obprintf( stderr, "popping last two values...\n" );
-		if ( vt == LUA_TNUMBER || vt == LUA_TSTRING ) {
-			lt_finalize( t );
-		}
-		lua_pop(L, 1);
-	}
-
-	lt_lock( t );
-	return 1;
-}
-#endif
-
-
-
-Table *tt;
-int twoSided = 0;
-
 //Go through and run something on a node and ALL of its descendants
 //Returns number of elements found (that match a certain type)
 //TODO: Add element count 
 //TODO: Add filter for element count
-int rr ( GumboNode *node ) {
+int gumbo_to_table ( GumboNode *node, Table *tt ) {
+
+
 	//Loop through the body and create a "Table" 
 	GumboVector *bc = &node->v.element.children;
 	int stat = 0;
@@ -262,19 +350,18 @@ int rr ( GumboNode *node ) {
 		GumboNode *n = bc->data[ i ] ;
 		char *itemname = retblock( n );
 
-#if 0
-		//Dump data if needed
+	#ifdef DEBUG
+		//DEBUG
 		//TODO: Put some kind of debug flag on this
 		char *type = (char *)print_gumbo_type( n->type );
 		fprintf( stderr, "%06d, %04d, %-10s, %s\n", ++gi, i, type, itemname );
-#endif
+	#endif
 
-#if 1
 		//Handle what to do with the actual node
 		//TODO: Handle GUMBO_NODE_[CDATA,COMMENT,DOCUMENT,WHITESPACE,TEMPLATE]
 		if ( n->type != GUMBO_NODE_TEXT && n->type != GUMBO_NODE_ELEMENT ) {
 			//User selected handling can take place here, usually a blank will do
-			twoSided = 0; 
+			//twoSided = 0; 
 			//lt_addnullvalue( t, itemname );
 		}
 		else if ( n->type == GUMBO_NODE_TEXT ) {
@@ -332,24 +419,53 @@ int rr ( GumboNode *node ) {
 				lt_ascend( tt );
 			}
 
-#if 0
+		#if 0
 			if ( !gv->length ) {
 				lt_addtextkey( tt, "text" );	
 				lt_addtextvalue( tt, "(nothing)" );	
 				lt_finalize( tt );
 			}
 			else {
-#endif
+		#endif
 			if ( gv->length ) {
-				rr( n );
+				gumbo_to_table( n, tt );
 			}
 
 			lt_ascend( tt );
 		}
-#endif
 	}
 
 	lt_lock( tt );
+	return 1;
+}
+
+
+
+//Put the raw HTML into a hash table 
+int parse_html ( Table *tt, unsigned char *block, int len ) {
+
+	//We can loop through the Gumbo data structure and create a node list that way
+	GumboOutput *output = gumbo_parse_with_options( &kGumboDefaultOptions, (char *)block, len ); 
+	GumboVector *children = &(output->root)->v.element.children;
+	GumboNode *body = find_tag( output->root, GUMBO_TAG_BODY );
+
+	if ( !body ) {
+		fprintf( stderr, PROG ": no <body> found!\n" );
+		return 0;
+	}
+
+	//Allocate a Table
+	if ( !lt_init( tt, NULL, 33300 ) ) {
+		fprintf( stderr, PROG ": couldn't allocate table!\n" );
+		return 0;
+	}
+
+	//Parse the document into a Table
+	int elements = gumbo_to_table( body, tt );
+
+	//Free the gumbo struture 
+	gumbo_destroy_output( &kGumboDefaultOptions, output );
+
 	return 1;
 }
 
@@ -361,14 +477,16 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 	//A data structure can take both of these...
 	InnerProc *pi = (InnerProc *)p;
 
+	#ifdef DEBUG
 	//Super debugging function :)
 	//fprintf( stderr, "@%5d: %p %c= %p\n", i, kv->parent, ( kv->parent == pi->parent ) ? '=' : '!', pi->parent );
+	#endif
 
 	//Check that parents are the same... 
 	if ( kv->parent && (kv->parent == pi->parent) && (i >= pi->jump) ) {
 		//...and that the full hash matches the key.
-		unsigned char fkBuf[ 2048 ] = {0};
-		if ( !lt_get_full_key( pi->srctable, i, fkBuf, sizeof(fkBuf) - 1 ) ) {
+		char fkBuf[ 2048 ] = {0};
+		if ( !lt_get_full_key(pi->srctable, i, (uint8_t *)fkBuf, sizeof(fkBuf)-1) ) {
 			return 1;
 		}
 
@@ -377,7 +495,7 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 		//fprintf( stderr, "%d ? %ld\n", pi->keylen, strlen( (char *)fkBuf ) ); 
 
 		//Check strings and see if they match? (this is kind of a crude check)
-		if ( pi->keylen == strlen( (char *)fkBuf ) && memcmp( pi->key, fkBuf, pi->keylen ) == 0 ) {
+		if ( pi->keylen == strlen( fkBuf ) && memcmp( pi->key, fkBuf, pi->keylen ) == 0 ) {
 			//save hash here and realloc a stretching int buffer...
 			//	pi->hlist = realloc( pi->hlist, sizeof(int) * (pi->hlistLen + 1) );
 			if ( pi->hlist ) 
@@ -386,30 +504,26 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 				pi->hlist = malloc( sizeof(int) );
 				*pi->hlist = 0;
 			}
-
-			//???
 			*(&pi->hlist[ pi->hlistLen ]) = i;
 			pi->hlistLen++;	
 		} 
 	}
-
 	return 1;
 }
 
 
-//
+//Pass through and build a smaller subset of tables
 int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Deref and get the first table in the list.
 	InnerProc *pi = (InnerProc *)p;
-	Table *ct = *pi->tlist;
+	//Table *ct = *pi->tlist;
+	Table *ct = pi->ctable;
 
 	//Get type of value, save accordingly.
 	LiteType kt = kv->key.type;
 	LiteType vt = kv->value.type;
-	//fprintf( stderr, "%s:%s\n", lt_typename(kt), lt_typename(vt));
-#if 1
-	//fprintf( stderr, "%s\n", kv->key.v.vchar );
-		//lt_addtextkey( ct, kv->key.v.vchar );	
+
+	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
 		lt_addintkey( ct, (kt==LITE_INT) ? kv->key.v.vint : kv->key.v.vfloat );	
 	else if ( kt == LITE_TXT )
@@ -421,6 +535,7 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 		return 1;
 	}
 
+	//Save value 
 	if ( vt == LITE_INT || vt == LITE_FLT ) 
 		lt_addintvalue( ct, kv->value.v.vint );	
 	else if ( vt == LITE_TXT )
@@ -430,20 +545,10 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	else if ( vt == LITE_TBL ) {
 		lt_descend( ct );
 	}
-	//lt_finalize( ct );
-#endif
 	return 1;
 }
 
 
-
-		//After building the miniatures, it's totally feasible to destroy the original table.
-		//lt_destroy( tt );
-
-		//You should also test the miniatures
-		//for ( int ti=0; ti < tablelist.len ; ti++ ) lt_dump( &(pp.tlist)[ ti ] );
-
-		//Then for each new table, find all the hashes
 #if 0
 		//Hold all of the database records somewhere.
 		DBRecord *records = NULL 
@@ -483,88 +588,60 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 //Much like moving through any other parser...
 int main() {
 
-	int fn, len;
-	struct stat sb;
-	char *block = NULL;
+	//Define references
+	int len = 0;
+	unsigned char *block = NULL;
+	Table tex, src; 
+	Table *tt = &src;
 
-#if 0
-	block = (char *)yamama;
-	len = strlen( block );
-#else
-	char fb[ 2000000 ] = {0};
-
-	//Read file to memory
-	if ( stat( html_file, &sb ) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
-		return 1; 
-	}
-
-	if ( (fn = open( html_file, O_RDONLY )) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
-		return 1; 
-	}
-	
-	if ( read( fn, fb, sb.st_size ) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
-		return 1; 
-	}
-
-	block = fb;
-	len = sb.st_size;
-#endif
-
-	//Parse that and do something
-	GumboOutput *output = gumbo_parse_with_options( &kGumboDefaultOptions, block, len ); 
-
-	//We can loop through the Gumbo data structure and create a node list that way
-	GumboVector *children = &(output->root)->v.element.children;
-	GumboNode *body = find_tag( output->root, GUMBO_TAG_BODY );
-	if ( !body ) {
-		fprintf( stderr, PROG ": no <body> found!\n" );
+	//Create a hash table out of the expected keys.
+	if ( !yamlList_to_table( expected_keys, &tex ) ) {
+		fprintf( stderr, "Faield to create hash list." );
 		return 1;
 	}
 
-	//Allocate a Table
-	Table t;
-	tt = &t;
-	if ( !lt_init( &t, NULL, 33300 ) ) {
-		fprintf( stderr, PROG ": couldn't allocate table!\n" );
+	//Get source somewhere.
+	if ( 1 )
+		load_page( html_file, &block, &len );
+	else if ( 0 )
+		;//load_www( "http://	
+	#ifdef DEBUG
+	else if ( 0 ) {
+		//Load from a static buffer in memory somewhere
+		block = (char *)yamama;
+		len = strlen( block );
+	}
+	#endif
+
+	//Create an HTML hash table
+	if ( !parse_html( tt, block, len ) ) {
 		return 1;
 	}
 
-	//Run the parser against everything
-	//TODO: Call this something more clear than rr()
-	int elements = rr( body );
-	lt_dump( tt );
 
 	//Loop through each of the requested nodes
 	//This will probably look more like:
-	//1. find "mini-root" or "loop" node
-	//2. copy a table from "loop" node (or start node) to an end node
-	//3. stream to database structure or whatever...
 	for ( int i=0; i<sizeof(nodes)/sizeof(Nodeblock); i++ ) {
 
-		//References
+		//Set some references
 		unsigned char fkbuf[ 2048 ] = { 0 };
 		NodeSet *root = &nodes[ i ].rootNode; 
 		NodeSet *jump = &nodes[ i ].jumpNode; 
 		//NodeSet *loop = &nodes[ i ].loopNodes; 
 
-		//2. Second step is to simply find the node
+		//Find the root node.
 		if ( ( root->hash = lt_geti( tt, root->string ) ) == -1 ) {
 			fprintf( stderr, PROG ": string '%s' not found.\n", root->string );
-			exit( 0 );
+			return 1;
 		}
-		fprintf(stderr, "@%-5d -> %s\n", root->hash, root->string );
+		//fprintf(stderr, "@%-5d -> %s\n", root->hash, root->string );
 
-		//2A. Jumping basically means that in the root node, there are many elements which we just don't need to worry about.	
-		//In this particular case, I need to find the first thing that matches the jump node, and/or input this myself.
-		//Let's try matching the jump node.
+		//Find the "jump" node.
 		if ( ( jump->hash = lt_geti( tt, jump->string ) ) == -1 ) {
 			fprintf( stderr, PROG ": string '%s' not found.\n", jump->string );
 			exit( 0 );
 		}
-		fprintf(stderr, "@%-5d -> %s\n", jump->hash, jump->string );
+		//fprintf(stderr, "@%-5d -> %s\n", jump->hash, jump->string );
 
 		//Get parent and do work.
 		char *fkey = (char *)lt_get_full_key( tt, jump->hash, fkbuf, sizeof(fkbuf) - 1 );
@@ -584,16 +661,15 @@ int main() {
 		lt_exec( tt, &pp, extract_same );
 		lt_reset( tt );
 
-		//Looping and being weird
+		//Build individual tables for each.
 		for ( int i=0; i<pp.hlistLen; i++ ) {
-
 			//TODO: For our purposes, 5743 is the final node.  Fix this.
 			int start, end;
 			start = pp.hlist[ i ];
 			end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
 
-			//TODO: Got to figure out what the issue is here, something having to do with lt_init
-			//Allocate a table (or five)
+			//TODO: Got to figure out what the issue is here, something having 
+			//to do with lt_init.  Allocate a table (or five)
 			Table *th = malloc( sizeof(Table) );
 			memset( th, 0, sizeof(Table) );
 			lt_init( th, NULL, 7777 );
@@ -604,26 +680,30 @@ int main() {
 			else {
 				pp.tlist = malloc( sizeof(Table *) );
 			}
+		
+			//Set references and pass in to be built	
+			//fprintf( stderr, "list: %d\n", pp.tlistLen );
 			*(&pp.tlist[ pp.tlistLen ]) = th;
+			pp.ctable = pp.tlist[ pp.tlistLen ];
 			pp.tlistLen ++;
 
 			//Create a new table
 			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
-
-			//Then look for the hashes
-			lt_dump( (*pp.tlist) );
-			exit( 0 );
 		}
+
+		//Destroy the both Gumbo map and source table. 
+		lt_free( tt );
+
+		//Now check that each table has something
+		for ( int i=0; i<pp.tlistLen; i++ ) {
+			lt_dump( pp.tlist[ i ] );
+			//Hash check on dem bi	
+		}
+
 	}
 
 	//Finally destroy the hlist	 (should just be one big block)
 	//free( hlist	);  
-		
-	//Free the Gumbo and Table structures
-	gumbo_destroy_output( &kGumboDefaultOptions, output );
-	//lt_free( &t );
-
-	//???
 	return 0; 
 
 }
