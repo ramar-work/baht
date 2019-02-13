@@ -434,7 +434,9 @@ unsigned char *trim (uint8_t *msg, char *trim, int len, int *nlen)
 
 
 #ifndef OPT_H
+#ifndef ERR_H
 static char opt_errmsg[ ERRV_LENGTH ] = { 0 };
+#endif
 
 //Set values when the user asks for them
 static _Bool opt_set_value (char **av, Value *v, char type, char *err) 
@@ -541,7 +543,9 @@ _Bool opt_eval (Option *opts, int argc, char **av) {
 					if ( !o->callback( ++av, &o->v, buf ) ) {
 						//NOTE: This is stupid, but the user will have no need for the Option array if an error occurs.
 						o = &opts[0];
+					#ifndef ERR_H
 						o->errmsg = opt_errmsg;
+					#endif
 						return serr( ERR_OPT_VALIDATION_FAILED, o, NULL );
 					}
 				}
@@ -552,14 +556,18 @@ _Bool opt_eval (Option *opts, int argc, char **av) {
 					//Why would this ever be?
 					if ( !(*av) ) {
 						o = &opts[0];
+					#ifndef ERR_H
 						o->errmsg = opt_errmsg;
+					#endif
 						return serr( ERR_OPT_EXPECTED_ANY, o, NULL );
 					}
 
 					//Catch what may be a flag
 					if ( strlen(*av) > 1 && *av[0] == '-' && *av[1] == '-' ) {
 						o = &opts[0];
+					#ifndef ERR_H
 						o->errmsg = opt_errmsg;
+					#endif
 						return serr( ERR_OPT_UNEXPECTED_FLAG, o, *av );
 					}
 			
@@ -573,7 +581,9 @@ _Bool opt_eval (Option *opts, int argc, char **av) {
 						for ( int i=0; i < strlen( *av ); i++ ) {
 							if ( (int)(*av)[i] < 48 || (int)(*av)[i] > 57 ) { //Not a number check
 								o = &opts[0];
+							#ifndef ERR_H
 								o->errmsg = opt_errmsg;
+							#endif
 								return serr( ERR_OPT_EXPECTED_NUMERIC_ARG, o, *av );
 							}
 						}
@@ -591,7 +601,9 @@ _Bool opt_eval (Option *opts, int argc, char **av) {
 
 						if ( !isstr ) {
 							o = &opts[0];
+						#ifndef ERR_H
 							o->errmsg = opt_errmsg;
+						#endif
 							return serr( ERR_OPT_EXPECTED_STRING_ARG, o, *av );
 						}
 						(&o->v)->s = *av;
@@ -1201,12 +1213,6 @@ static const char *lt_polymorph_type_names[] =
 };
 
 
-//Get full string (using build_backwards) 
-char *lt_get_full_key ( Table *t, int hash, unsigned char *buf, int bs ) {
-	return NULL;
-}
-
-
 //Build a string or some other index in reverse
 static int build_backwards (LiteKv *t, unsigned char *buf, int bs) { 
 	//This should return if there is no value...
@@ -1250,6 +1256,17 @@ static int build_backwards (LiteKv *t, unsigned char *buf, int bs) {
 	return size;
 }
 
+
+//Get full string (using build_backwards) 
+unsigned char *lt_get_full_key ( Table *t, int hash, unsigned char *buf, int bs ) {
+	LiteKv *kv = lt_retkv( t, hash );	
+	//unsigned char tmp[ 2048 ] = { 0 };
+	if ( kv ) {
+		build_backwards( kv, buf, bs - 1 );
+		return buf;
+	}
+	return NULL;
+}
 
 
 //Trim things
@@ -1356,8 +1373,7 @@ Table *lt_init (Table *t, LiteKv *k, int size) {
 	if ( !k ) {
 		actual_size = t->modulo;
 		k = malloc(t->modulo * sizeof(LiteKv));
-		if ( !k ) 
-		{	
+		if ( !k ) {	
 			t->error = ERR_LT_ALLOCATE;
 			return 0;
 		}
@@ -1551,7 +1567,6 @@ int lt_move (Table *t, int dir) {
 #ifndef SUPEREXTRA
 	lt_finalize( t );		
 #endif
-
 	return 1;
 }
 
@@ -1753,6 +1768,22 @@ LiteRecord *lt_ret (Table *t, LiteType type, int index) {
 }
 
 
+//Set the index to another one (absolutely)
+int lt_absset( Table *t, int index ) {
+	//Can't return less than 0
+	if ( index < 0 || index > t->count ) {
+		return 0;
+	}
+
+	//Rewind by the current index then increment by the new index	
+	t->current -= t->index;
+	t->index = index;
+	t->current += t->index ;	
+	t->cptr = (t->head + t->index)->value.v.vtable.ptr;
+	return 1;
+}
+
+
 //Set the current index to another one
 int lt_set (Table *t, int index) {
 	int j = 0;	
@@ -1830,14 +1861,12 @@ LiteKv *lt_items_by_index (Table *t, int ind)
 
 
 //Find a table by hash and return until it has no more keys.
-LiteKv *lt_items_i (Table *t, uint8_t *src, int len)
-{
+LiteKv *lt_items_i (Table *t, uint8_t *src, int len) {
 	//Find a hash, and if it's a table... set some stuff
 	LiteKv *curr = NULL;
 
 	//Check for a hash table
-	if ( t->cptr == -1 )
-	{
+	if ( t->cptr == -1 ) {
 		int in;
 		if ( (in = lt_get_long_i ( t, src, len )) == -1 )
 			return NULL;
@@ -1850,15 +1879,15 @@ LiteKv *lt_items_i (Table *t, uint8_t *src, int len)
 	}
 
 	//
-	if (t->index > t->count) 
+	if (t->index > t->count) {
 		return NULL;
+	}
 
 	//Set reference
 	curr = t->head + t->index;
 
 	//Check the key name and see if it matches t->cptr, return null if so
-	if ( curr->key.type == LITE_TRM && curr->key.v.vptr == t->cptr ) 
-	{
+	if ( curr->key.type == LITE_TRM && curr->key.v.vptr == t->cptr ) {
 		t->index = 0;
 		t->cptr = -1;
 		return NULL;
@@ -1872,15 +1901,13 @@ LiteKv *lt_items_i (Table *t, uint8_t *src, int len)
 
 
 //Set a data source
-void lt_setsrc (Table *t, void *src)
-{
+void lt_setsrc (Table *t, void *src) {
 	t->src = src;
 }
 
 
 //Will set boundaries on a new table
-Table *lt_within_long( Table *st, uint8_t *src, int len )
-{
+Table *lt_within_long( Table *st, uint8_t *src, int len ) {
 #if 0
 	//You can allocate the string here if both start and from are null
 	if ( !t->start && !t->end )
@@ -1900,8 +1927,9 @@ Table *lt_within_long( Table *st, uint8_t *src, int len )
 	st->buflen = len;
 
 	//Search for a table	
-	if ( (a = lt_get_long_i( st, src, len )) == -1 || lt_vta( st, a ) != LITE_TBL )
+	if ( (a = lt_get_long_i( st, src, len )) == -1 || lt_vta( st, a ) != LITE_TBL ) {
 		return NULL;
+	}
 
 	//Set start and end, then return the table
 	st->start = a;
@@ -2129,7 +2157,7 @@ int __lt_dump ( LiteKv *kv, int i, void *p ) {
 	return 1;
 }
 
-
+#if 0
 //Write a real simple function to iterate through everything
 //void lt_complex_exec (Table *t, int (*fp)( LiteType t, LiteValue *k, LiteValue *v, int i, void *p ) )
 int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) ) {
@@ -2144,7 +2172,27 @@ int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) ) {
 	}
 	return 1;
 }
+#endif
 
+
+//A complicated iterator
+int lt_exec_complex (Table *t, int start, int end, void *p, int (*fp)( LiteKv *kv, int i, void *p ) ) {
+	int level = 0;	
+
+	//Bounds violations should stop.
+	if ( start < 0 || start > t->count || end < 0 || end > t->count ) {
+		return 0;
+	}
+
+	//Loop through each index
+	for (int i=start, status=0; i <= end; i++) {
+		//VPRINT( "kv at __lt_dump: %p", (t->head + i ));
+		if ( (status = fp( (t->head + i), i, p )) == 0 ) {
+			return 0;
+		}
+	}
+	return 1;
+}
 
 
 

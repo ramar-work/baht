@@ -139,28 +139,28 @@
 #define szprintf(k) \
 	fprintf(stderr, "Size of %-22s: %ld\n", #k, sizeof(k));
 
+//TODO: There isn't a great way to solve the vararg problem.  
+//I've pasted a test program below to illustrate how
+//difficult it can get to do this right.
+#if 0
+#include <stdio.h>
+
+#define VA(...) \
+	fprintf( stderr, "va args is '%s' long\n", ##__VA_ARGS__ ) 
+
+int main (int argc, char *argv[] ) {
+	//how long is va args here?
+	VA( "aasdfsadf", "cbcdfef" );
+	//how about here?
+	VA( " " );
+	//and here?
+	VA( NULL );
+	//how about here?
+	VA( );
+}
+#endif
+
 #ifndef ERR_H
-	//TODO: There isn't a great way to solve the vararg problem.  
-	//I've pasted a test program below to illustrate how
-	//difficult it can get to do this right.
-	#if 0
-			#include <stdio.h>
-
-			#define VA(...) \
-				fprintf( stderr, "va args is '%s' long\n", ##__VA_ARGS__ ) 
-
-			int main (int argc, char *argv[] ) {
-				//how long is va args here?
-				VA( "aasdfsadf", "cbcdfef" );
-				//how about here?
-				VA( " " );
-				//and here?
-				VA( NULL );
-				//how about here?
-				VA( );
-			}
-	#endif
-
 	//TODO: the option to add \n should be somewhere too
  #ifndef ERRV_H
 	#define ERRV_LENGTH 2048
@@ -202,12 +202,15 @@
 		( fprintf(stderr, "%s", PROGRAM_NAME) ? 0 : 0 ) || \
 		( fprintf(stderr, "%s\n", __SingleLibErrors[ c ] ) ? n : n ) \
 	)
-#if 0
+ #if 0
   #define err(n, ...) (( fprintf(stderr, __VA_ARGS__) ? 0 : 0 ) || fprintf( stderr, "\n" ) ? n : n)
   #define serr(n, s, ...) ((s->error = n ) ? 0 : 0 ) || ( snprintf(s->errmsg, ERRV_LENGTH - 1, __SingleLibErrors[ n ], __VA_ARGS__ ) ? n : n ) 
   #define perr(n, c) ( fprintf(stderr, "%s", PROGRAM_NAME) ? 0 : 0 ) || ( fprintf(stderr, "%s\n", __SingleLibErrors[ c ] ) ? n : n )
-#endif
  #endif
+ #endif
+#else
+	#define serr(n, s, ...) n
+	#define perr(n, c)
 #endif
 
 #ifdef DEBUG_H
@@ -279,6 +282,8 @@
 	lt_set( t, pos ) 
  #define lt_rewind(t, pos) \
 	lt_set( t, pos )
+ #define lt_exec(t, a, b) \
+	lt_exec_complex( t, 0, t->index, a, b )
  #define lt_dump(t) \
 	lt_exec( t, &__lt_int, __lt_dump )
  #define lt_blob_at( t, i ) \
@@ -931,8 +936,7 @@ typedef union  LiteRecord LiteRecord;
 
 
 //Table for table values
-typedef enum 
-{
+typedef enum {
   LITE_NON = 0, //Uninitialized values
   LITE_INT,     //Integer
   LITE_FLT,     //FLoat
@@ -1510,7 +1514,8 @@ int __lt_dump ( LiteKv *kv, int i, void *p );
 unsigned int __lt_int;
 //void lt_dump (Table *t) ;
 //void lt_complex_exec (Table *t, int (*fp)( LiteType t, LiteValue *k, LiteValue *v, void *p ) );
-int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
+//int lt_exec (Table *t, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
+int lt_exec_complex (Table *t, int start, int end, void *p, int (*fp)( LiteKv *kv, int i, void *p ) );
 int lt_move(Table *t, int dir) ;
 //static void lt_printindex (LiteKv *tt, int ind);
 LiteKv *lt_retkv (Table *t, int index);
@@ -1518,10 +1523,12 @@ LiteType lt_rettype( Table *t, int side, int index );
 const char *lt_rettypename( Table *t, int side, int index );
 void lt_lock (Table *t); 
 int lt_get_long_i (Table *t, unsigned char *find, int len);
+unsigned char *lt_get_full_key ( Table *t, int hash, unsigned char *buf, int bs );
 LiteKv *lt_next (Table *t);
 LiteKv *lt_current (Table *t);
 void lt_reset (Table *t);
 int lt_set (Table *t, int index);
+int lt_absset( Table *t, int index ) ;
 int lt_get_raw (Table *t, int index);
 LiteValue *lt_retany (Table *t, int index);
 LiteRecord *lt_ret (Table *t, LiteType type, int index);

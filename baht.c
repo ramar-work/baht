@@ -29,6 +29,7 @@
  - add the option to read directly from memory (may save time)
  - add the option to read from hashes from text file (better than recompiling if
    something goes wrong)
+
  * ---------------------------------------------- */
 #if 0 
 #include <stdio.h> 
@@ -43,6 +44,7 @@
 #include <gumbo.h>
 #define PROG "p"
 
+#define RERR(...) fprintf( stderr, __VA_ARGS__ ) ? 1 : 1 
 
 typedef struct nodeset {
 	int hash;             //Stored hash
@@ -72,7 +74,7 @@ typedef struct nodeblock {
 
 Nodeblock nodes[] = {
 /*.content = "files/carri.html"*/
-	{ 
+	{
 		.rootNode = {.string = "div^backdrop.div^content_a.div^content_b.center"} 
 	 //,.jumpNode = { .string = "div^backdrop.div^content_a.div^content_b.center" } 
 	 ,.jumpNode = {.string = "div^backdrop.div^content_a.div^content_b.center.div^thumb_div" }
@@ -93,7 +95,8 @@ typedef struct useless_structure {
 	int hlistLen;
 	int tlistLen;
 	int *hlist;
-	Table *tlist;
+	Table **tlist;
+	Table *dtable;
 } InnerProc;
 
 
@@ -376,8 +379,9 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 		//Check strings and see if they match? (this is kind of a crude check)
 		if ( pi->keylen == strlen( (char *)fkBuf ) && memcmp( pi->key, fkBuf, pi->keylen ) == 0 ) {
 			//save hash here and realloc a stretching int buffer...
+			//	pi->hlist = realloc( pi->hlist, sizeof(int) * (pi->hlistLen + 1) );
 			if ( pi->hlist ) 
-				pi->hlist = realloc( pi->hlist, sizeof(int) * pi->hlistLen );
+				pi->hlist = realloc( pi->hlist, sizeof(int) * (pi->hlistLen + 1) );
 			else {
 				pi->hlist = malloc( sizeof(int) );
 				*pi->hlist = 0;
@@ -397,21 +401,83 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Deref and get the first table in the list.
 	InnerProc *pi = (InnerProc *)p;
-	Table *ct = pi->tlist;
+	Table *ct = *pi->tlist;
 
 	//Get type of value, save accordingly.
-	//TEXT 
-	//BLOB
-	//INT
-	//FLOAT
-	//TABLE
-#if 0
-	lt_addtextkey( ct, kv->v.key.vchar );	
-	lt_addtextvalue( ct, kv->v.value.vchar );	
-	lt_finalize( ct );
+	LiteType kt = kv->key.type;
+	LiteType vt = kv->value.type;
+	//fprintf( stderr, "%s:%s\n", lt_typename(kt), lt_typename(vt));
+#if 1
+	//fprintf( stderr, "%s\n", kv->key.v.vchar );
+		//lt_addtextkey( ct, kv->key.v.vchar );	
+	if ( kt == LITE_INT || kt == LITE_FLT ) 
+		lt_addintkey( ct, (kt==LITE_INT) ? kv->key.v.vint : kv->key.v.vfloat );	
+	else if ( kt == LITE_TXT )
+		lt_addtextkey( ct, kv->key.v.vchar );	
+	else if ( kt == LITE_BLB )
+		lt_addblobkey( ct, kv->key.v.vblob.blob, kv->key.v.vblob.size );	
+	else if ( kt == LITE_TRM ) {
+		lt_ascend( ct );
+		return 1;
+	}
+
+	if ( vt == LITE_INT || vt == LITE_FLT ) 
+		lt_addintvalue( ct, kv->value.v.vint );	
+	else if ( vt == LITE_TXT )
+		lt_addtextvalue( ct, kv->value.v.vchar );	
+	else if ( vt == LITE_BLB)
+		lt_addblobvalue( ct, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
+	else if ( vt == LITE_TBL ) {
+		lt_descend( ct );
+	}
+	//lt_finalize( ct );
 #endif
 	return 1;
 }
+
+
+
+		//After building the miniatures, it's totally feasible to destroy the original table.
+		//lt_destroy( tt );
+
+		//You should also test the miniatures
+		//for ( int ti=0; ti < tablelist.len ; ti++ ) lt_dump( &(pp.tlist)[ ti ] );
+
+		//Then for each new table, find all the hashes
+#if 0
+		//Hold all of the database records somewhere.
+		DBRecord *records = NULL 
+
+		//Loop through each table in the set
+		for ( int ti=0; ti < tablelist.len ; ti++ ) {
+
+			//Mark the node
+			Table *mt = &(pp.tlist)[ ti ];
+			
+			//Using a list of strings from earlier, find each node in the NEW table
+			for ( int ii = 0; ii < stringsToHash.len; ii++ ) { 
+
+				//Get the node ref
+				char *res = ( char * )find_node( mt, stringsToHash[ ii ] );
+
+				//Save the record
+				if ( !res ) 
+					;
+				else {
+					*record = { SQL_TYPE, 'column', res };
+					record++;
+				}
+
+			}
+
+			//It might save memory to go through all the records after each run and reduce memory usage.
+			//db_exec( &record... ) ;  //clearly have no idea how this works...
+			//free( record );
+			//destroy mini table
+			//lt_free( mt );
+		}
+#endif
+
 
 
 //Much like moving through any other parser...
@@ -476,13 +542,7 @@ int main() {
 	//1. find "mini-root" or "loop" node
 	//2. copy a table from "loop" node (or start node) to an end node
 	//3. stream to database structure or whatever...
-	for ( int i=0; i<sizeof(nodes)/sizeof(NodeSet); i++ ) {
-#if 0	
-		//1. Read each line (of YAML or whatever) into this structure	
-		struct s { char *left, *right; } list = chop_line( *line );
-		//1a. This could come from a compiled in data structure, but that's not the
-		//best method here...
-#endif
+	for ( int i=0; i<sizeof(nodes)/sizeof(Nodeblock); i++ ) {
 
 		//References
 		unsigned char fkbuf[ 2048 ] = { 0 };
@@ -526,85 +586,35 @@ int main() {
 
 		//Looping and being weird
 		for ( int i=0; i<pp.hlistLen; i++ ) {
-			//fprintf( stderr, "hash: %d\n", pp.hlist[ i ] );
-			//rebuild with this function
-			if ( !lt_absset( tt, pp.hlist[ i ] ) ) {
-				fprintf( stderr, "Couldn't reset table pointer.\n" );
-				exit( 0 );
-			}
 
-			//How do I see the table?
-			LiteKv *ct = lt_current( tt );
-			fprintf( stderr, "%d -> %p\n", pp.hlist[ i ], ct );
-#if 1
 			//TODO: For our purposes, 5743 is the final node.  Fix this.
 			int start, end;
 			start = pp.hlist[ i ];
-			end = ( i+1 > pp.hlistLen ) ? tt->count : pp.hlist[ i+1 ]; 
+			end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
 
-#if 0
+			//TODO: Got to figure out what the issue is here, something having to do with lt_init
+			//Allocate a table (or five)
+			Table *th = malloc( sizeof(Table) );
+			memset( th, 0, sizeof(Table) );
+			lt_init( th, NULL, 7777 );
+
 			//Add space for new table here
-			if ( pi->tlist ) 
-				pi->tlist = realloc( pi->hlist, sizeof(Table) * pi->hlistLen );
+			if ( pp.tlist ) 
+				pp.tlist = realloc( pp.tlist, sizeof(Table *) * ( pp.tlistLen + 1 ) );
 			else {
-				pi->tlist = malloc( sizeof(Table) );
-				*pi->tlist = 0;
+				pp.tlist = malloc( sizeof(Table *) );
 			}
+			*(&pp.tlist[ pp.tlistLen ]) = th;
+			pp.tlistLen ++;
 
-			//???
-			*(&pi->hlist[ pi->hlistLen ]) = i;
-			pi->hlistLen++;	
-#endif
+			//Create a new table
+			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
 
-			//Check the status, cuz it could be false...
-			lt_exec_complex( tt, start, end, &pp, build_individual );
-#endif
-		}
-
-		//After building the miniatures, it's totally feasible to destroy the original table.
-		//lt_destroy( tt );
-
-		//You should also test the miniatures
-		//for ( int ti=0; ti < tablelist.len ; ti++ ) {
-		//	Table *mt = &(pp.tlist)[ ti ];
-		//	lt_dump( mt );
-		//}
-
-		//Then for each new table, find all the hashes
-#if 0
-		//Hold all of the database records somewhere.
-		DBRecord *records = NULL 
-
-		//Loop through each table in the set
-		for ( int ti=0; ti < tablelist.len ; ti++ ) {
-
-			//Mark the node
-			Table *mt = &(pp.tlist)[ ti ];
-			
-			//Using a list of strings from earlier, find each node in the NEW table
-			for ( int ii = 0; ii < stringsToHash.len; ii++ ) { 
-
-				//Get the node ref
-				char *res = ( char * )find_node( mt, stringsToHash[ ii ] );
-
-				//Save the record
-				if ( !res ) 
-					;
-				else {
-					*record = { SQL_TYPE, 'column', res };
-					record++;
-				}
-
-			}
-
-			//It might save memory to go through all the records after each run and reduce memory usage.
-			//db_exec( &record... ) ;  //clearly have no idea how this works...
-			//free( record );
-			//destroy mini table
-			//lt_free( mt );
-#endif
+			//Then look for the hashes
+			lt_dump( (*pp.tlist) );
 			exit( 0 );
 		}
+	}
 
 	//Finally destroy the hlist	 (should just be one big block)
 	//free( hlist	);  
