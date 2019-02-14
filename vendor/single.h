@@ -1047,8 +1047,7 @@ struct Value {
 };
 
 typedef struct Option Option;
-struct Option
-{
+struct Option {
 	const char  *sht,
               *lng,
 	            *description;

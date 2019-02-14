@@ -79,6 +79,10 @@
 	 ,.hlistLen = 0 \
 	}
 
+const char *errMessages[] = {
+	NULL
+};
+
 typedef struct nodeset {
 	int hash;             //Stored hash
 	const char *key;      //Key that the value corresponds to
@@ -186,24 +190,31 @@ yamlList expected_keys[] = {
  #define ROOT ""
 #endif
 yamlList testNodes[] = {
-   {              "model", "table^thumb_table_a.tbody.tr.td^thumb_ymm.text" }
+	//not quite...
+   {              "model", "div^thumb_div.table^thumb_table_a.tbody.tr.td^thumb_ymm.text" }
 #if 1 
+  ,{    "individual_page", "div^thumb_div.table^thumb_table_a.tbody.tr.td^font5 thumb_more_info.a^font6 thumb_more_info_link.attrs.href" }
+  ,{            "mileage", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.1.tr.2.td.text" }
+  ,{       "transmission", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.2.tr.1.td.text" }
+  ,{              "price", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.2.tr.2.td.text" }
+
+#else
   ,{               "year", NULL }
   ,{               "make", NULL }
-  ,{    "individual_page", "table^thumb_table_a.tbody.tr.td^font5 thumb_more_info.a^font6 thumb_more_info_link.attrs.href" }
-  ,{            "mileage", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
-  ,{       "transmission", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{    "individual_page", "div^thumb_div.table^thumb_table_a.tbody.tr.td^font5 thumb_more_info.a^font6 thumb_more_info_link.attrs.href" }
+  ,{            "mileage", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{       "transmission", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
   ,{         "drivetrain", NULL }
   ,{                "abs", NULL }
   ,{   "air_conditioning", NULL }
   ,{             "carfax", NULL }
   ,{          "autocheck", NULL }
   ,{           "autotype", NULL }
-  ,{              "price", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{              "price", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
   ,{               "fees", NULL }
   ,{                "kbb", NULL }
-  ,{        "description", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.p^font3 thumb_description_text.text" }
-  ,{             "engine", "table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
+  ,{        "description", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.p^font3 thumb_description_text.text" }
+  ,{             "engine", "div^thumb_div.table^thumb_table_b.tbody.tr.td^thumb_content_right.div^thumb_table_c.table^font7 thumb_info_text.tbody.tr.td.text" }
   ,{                "mpg", NULL }
   ,{          "fuel_type", NULL }
   ,{           "interior", NULL }
@@ -289,32 +300,46 @@ GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 
 
 //Load a page and write to buffer
-int load_page ( const char *file, unsigned char **dest, int *destlen ) {
+int load_page ( const char *file, char **dest, int *destlen ) {
 
 	int fn;
 	struct stat sb;
+	char *err = malloc( 1024 );
+	memset( err, 0, 1024 );
 
 	//Read file to memory
 	if ( stat( file, &sb ) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		//fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		snprintf( err, 1023, "%s: %s\n", PROG, strerror( errno ) );
+		*dest = err;
+		*destlen = strlen( err );
 		return 0; 
 	}
 
 	//Open the file
 	if ( (fn = open( file, O_RDONLY )) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		//fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		snprintf( err, 1023, "%s: %s\n", PROG, strerror( errno ) );
+		*dest = err;
+		*destlen = strlen( err );
 		return 0; 
 	}
 
 	//Allocate a buffer big enough to just write to memory.
 	if ( !(*dest = malloc( sb.st_size + 10 )) ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		//fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		snprintf( err, 1023, "%s: %s\n", PROG, strerror( errno ) );
+		*dest = err;
+		*destlen = strlen( err );
 		return 0; 
 	}
 
 	//Read the file into buffer	
 	if ( read( fn, *dest, sb.st_size ) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		//fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		snprintf( err, 1023, "%s: %s\n", PROG, strerror( errno ) );
+		*dest = err;
+		*destlen = strlen( err );
 		return 0; 
 	}
 
@@ -502,7 +527,7 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 
 
 //Put the raw HTML into a hash table 
-int parse_html ( Table *tt, unsigned char *block, int len ) {
+int parse_html ( Table *tt, char *block, int len ) {
 
 	//We can loop through the Gumbo data structure and create a node list that way
 	GumboOutput *output = gumbo_parse_with_options( &kGumboDefaultOptions, (char *)block, len ); 
@@ -633,26 +658,107 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 #endif
 
 
+yamlList ** find_keys_in_mt ( Table *t, yamlList *tn, int *len ) {
+	yamlList **sql = NULL;
+	int h=0, sqlLen = 0;
+	while ( tn->k ) {
+		if ( !tn->v )
+			;//fprintf( stderr, "No target value for column %s\n", tn->k );	
+		else {
+	#if 1
+			//fprintf( stderr, "hash of %s: %d\n", tn->v, lt_geti( t, tn->v ) );
+			if ( (h = lt_geti( t, tn->v )) == -1 )
+				0;
+			else {
+				yamlList *kv = malloc( sizeof(yamlList) );
+				kv->k = tn->k;
+				kv->v =	lt_text_at( t, h );  
+				ADD_ELEMENT( sql, sqlLen, yamlList *, kv ); 
+			}
+	#else
+			//slower, but potentially easier for me (the user)...
+			fprintf( stderr, "Finding value for column: %s\n", tn->k );
+			int p;
+			char buf[ 2048 ] = {0};
+			const char *rootShort = "div^thumb_div.";
+			memcpy( buf, rootShort, (p = strlen( rootShort )) );
+			memcpy( &buf[ p ], tn->v, strlen( tn->v ) );
+			fprintf( stderr, "hash of %s: %d\n", buf, lt_geti( t, buf ) );
+			lt_geti( t, buf );
+	#endif
+		}
+		tn++;
+	}
+	yamlList *term = malloc( sizeof(yamlList) );
+	term->k = NULL;
+	ADD_ELEMENT( sql, sqlLen, yamlList *, term );
+	*len = sqlLen;
+	return sql;
+}
+
+
+Option opts[] = {
+	{ "-f", "--file", "Get a file on the command line.", 's' }
+ ,{ "-u", "--url",  "Get something from the WWW", 's' }
+ ,{ "-h", "--help", "Show help" }
+ ,{ .sentinel = 1 }
+};
+#if 0
+//Command loop
+struct Cmd {
+	const char *cmd;
+	int (*exec)( Option *, char *, Passthru *pt );
+} Cmds[] = {
+	{ "--kill"     , kill_cmd  }
+ ,{ "--file"     , file_cmd  }
+ ,{ "--start"    , start_cmd }
+ ,{ NULL         , NULL      }
+};
+#endif
+
 
 //Much like moving through any other parser...
-int main() {
+int main( int argc, char *argv[] ) {
+
+	//Process some options
+	(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);
 
 	//Define references
-	int len = 0;
-	unsigned char *block = NULL;
-	Table tex, src; 
+	int len=0;
+	Table tex, src;
 	Table *tt = &src;
-
-	//Create a hash table out of the expected keys.
-	if ( !yamlList_to_table( expected_keys, &tex ) ) {
-		return RERR( PROG ": Failed to create hash list.\n" );
-	}
+	char *block = NULL;
+	char *srcsrc = NULL;
+	char *psrc[] = { NULL, NULL };
+	char **p = psrc;
 
 	//Get source somewhere.
-	if ( 1 )
-		load_page( html_file, &block, &len );
-	else if ( 0 )
-		;//load_www( "http://	
+	if ( opt_set( opts, "--file" ) ) {
+	#if 0
+		srcsrc = (char *)html_file;
+	#else
+		srcsrc = opt_get( opts, "--file" ).s;
+	#endif
+		if ( !load_page( srcsrc, &block, &len ) ) {
+			return RERR( PROG ": Error loading page: '%s'\n.", srcsrc );	
+		}
+		*p = (char *)block;
+	}
+	else if ( opt_set( opts, "--url" ) ) {
+		srcsrc = opt_get( opts, "--url" ).s;
+		;//load_www( srcsrc, &block, &len );
+		*p = (char *)block;
+		return RERR( PROG ": URLS just don't work right now.  Sorry... :)" );	
+	}
+	#if 0
+	//Open a directory?
+	else if ( opt_set( opts, "--directory" ) ) {
+		srcsrc = opt_get( opts, "--directory" ).s;
+		;//load_www( srcsrc, &block, &len );
+		//Copy things to things
+		*p = (char *)block;
+	}
+	#endif
 	#ifdef DEBUG
 	else if ( 0 ) {
 		//Load from a static buffer in memory somewhere
@@ -661,94 +767,119 @@ int main() {
 	}
 	#endif
 
-	//Create an HTML hash table
-	if ( !parse_html( tt, block, len ) ) {
-		return RERR( PROG ": Couldn't parse HTML to hash Table.\n" );
-	}
+	//
 
-	//Set some references
-	unsigned char fkbuf[ 2048 ] = { 0 };
-	int rootNode, jumpNode, activeNode;
-	NodeSet *root = &nodes[ 0 ].rootNode,  *jump = &nodes[ 0 ].jumpNode; 
+	//Loop through things
+	while ( *p ) {	
 
-	//Find the root node.
-	if ( ( rootNode = lt_geti( tt, root->string ) ) == -1 ) {
-		return RERR( PROG ": string '%s' not found.\n", root->string );
-	}
+	#if 1
+		//This is a test
+		//Create a hash table out of the expected keys.
+		if ( !yamlList_to_table( expected_keys, &tex ) )
+			return RERR( PROG ": Failed to create hash list.\n" );
+	#endif
 
-	//Find the "jump" node.
-	if ( !jump->string ) 
-		jumpNode = rootNode;
-	else {
-		if ( ( jumpNode = lt_geti( tt, jump->string ) ) == -1 ) {
-			return RERR( PROG ": jump string '%s' not found.\n", jump->string );
-		}
-	}
+		//Create an HTML hash table
+		if ( !parse_html( tt, block, len ) )
+			return RERR( PROG ": Couldn't parse HTML to hash Table.\n" );
 
-	//Get parent and do work.
-	char *fkey = (char *)lt_get_full_key( tt, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
-	SET_INNER_PROC(pp, tt, rootNode, jumpNode, fkey );
+		//Set some references
+		unsigned char fkbuf[ 2048 ] = { 0 };
+		int rootNode, jumpNode, activeNode;
+		NodeSet *root = &nodes[ 0 ].rootNode,  *jump = &nodes[ 0 ].jumpNode; 
 
-	//Start the extraction process 
-	lt_exec( tt, &pp, extract_same );
-	lt_reset( tt );
+		//Find the root node.
+		if ( ( rootNode = lt_geti( tt, root->string ) ) == -1 )
+			return RERR( PROG ": string '%s' not found.\n", root->string );
 
-	//Build individual tables for each.
-	for ( int i=0; i<pp.hlistLen; i++ ) {
-		//TODO: For our purposes, 5743 is the final node.  Fix this.
-		int start = pp.hlist[ i ];
-		int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
-		
-		//TODO: Add 'lt_get_optimal_hash_size( ... )'
-		//int oz = lt_get_optimal_hz( int );
-
-		//TODO: Got to figure out what the issue is here, something having 
-		//to do with lt_init.  Allocate a table (or five)
-		Table *th = malloc( sizeof(Table) );
-		lt_init( th, NULL, 7777 );
-		ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
-		pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
-
-		//Create a new table
-		lt_exec_complex( tt, start, end - 1, &pp, build_individual );
-		lt_lock( pp.ctable );
-	}
-
-	//Destroy the source table. 
-	lt_free( tt );
-
-	//Now check that each table has something
-	for ( int i=0; i<pp.tlistLen; i++ ) {
-		Table *tl = pp.tlist[ i ];
-		lt_kdump( tl );
-
-#if 1
-		//Hash check on dem bi	
-		yamlList *tn = testNodes;
-		while ( tn->k ) {
-		#if 0
-			fprintf( stderr, "hash of %s: %d\n", tn->v, lt_geti( tl, tn->v ) );
-		#else
-			//slower, but easier on me...
-			if ( !tn->v )
-				;//fprintf( stderr, "No target value for column %s\n", tn->k );	
-			else {
-				fprintf( stderr, "Finding value for column: %s\n", tn->k );
-				int p;
-				char buf[ 2048 ] = {0};
-				const char *rootShort = "div^thumb_div.";
-				memcpy( buf, rootShort, (p = strlen( rootShort )) );
-				memcpy( &buf[ p ], tn->v, strlen( tn->v ) );
-				fprintf( stderr, "hash of %s: %d\n", buf, lt_geti( tl, buf ) );
+		//Find the "jump" node.
+		if ( !jump->string ) 
+			jumpNode = rootNode;
+		else {
+			if ( ( jumpNode = lt_geti( tt, jump->string ) ) == -1 ) {
+				return RERR( PROG ": jump string '%s' not found.\n", jump->string );
 			}
-		#endif
-			tn++;
 		}
 
-		//exit( 0 ); 
-#endif
+		//Get parent and do work.
+		char *fkey = (char *)lt_get_full_key( tt, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
+		SET_INNER_PROC(pp, tt, rootNode, jumpNode, fkey );
+
+		//Start the extraction process 
+		lt_exec( tt, &pp, extract_same );
+		lt_reset( tt );
+
+		//Build individual tables for each.
+		for ( int i=0; i<pp.hlistLen; i++ ) {
+			//TODO: For our purposes, 5743 is the final node.  Fix this.
+			int start = pp.hlist[ i ];
+			int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
+			
+			//TODO: Add 'lt_get_optimal_hash_size( ... )'
+			//int oz = lt_get_optimal_hz( int );
+
+			//TODO: Got to figure out what the issue is here, something having 
+			//to do with lt_init.  Allocate a table (or five)
+			Table *th = malloc( sizeof(Table) );
+			lt_init( th, NULL, 7777 );
+			ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
+			pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
+
+			//Create a new table
+			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
+			lt_lock( pp.ctable );
+		}
+
+		//Destroy the source table. 
+		lt_free( tt );
+
+		//Now check that each table has something
+		for ( int i=0; i<pp.tlistLen; i++ ) {
+			Table *tl = pp.tlist[ i ];
+			//lt_kdump( tl );
+
+			//Hash check on dem bi	
+			yamlList *tn = testNodes;
+			int baLen = 0, vLen = 0, mtLen = 0;
+			char babuf[ 20000 ] = {0};
+			char vbuf[ 100000 ] = {0};
+			char fbuf[ 120000 ] = {0};
+			const char fmt[] = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+			yamlList **keys = find_keys_in_mt( tl, tn, &mtLen );
+
+			//Then loop through matched keys and values
+			while ( (*keys)->k ) {
+				//TODO: You may have to convert the resultant text to a typesafe value (int, etc)
+				//fprintf( stderr, "%s -> %s\n", (*keys)->k, (*keys)->v );
+				//Add bind args first 
+				memcpy( &babuf[ baLen ], (*keys)->k, strlen( (*keys)->k ) ); 
+				baLen += strlen( (*keys)->k ); 
+
+				//Add actual words
+				memcpy( &vbuf[ vLen ], "\"", 1 );
+				memcpy( &vbuf[ vLen + 1 ], (*keys)->v, strlen( (*keys)->v ) ); 
+				vLen += strlen( (*keys)->v ) + 1;
+				memcpy( &vbuf[ vLen ], "\"", 1 );
+				vLen ++;
+
+				//Add a comma
+				memcpy( &babuf[ baLen ], ", ", 2 );
+				memcpy( &vbuf[ vLen ], ", ", 2 );
+				keys++, baLen+= 2, vLen+= 2; 
+			} 
+
+			//Create a SQL creation string, if any hashes were found.
+			if ( mtLen > 1 ) {
+				baLen -= 2, vLen -= 2;
+				babuf[ baLen ] = '\0';
+				vbuf[ vLen ] = '\0';
+				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
+				fprintf( stderr, "%s\n", fbuf );
+			}
+		}
+
+		p++;
 	}
-exit( 0 );
 
 	//for ( ... ) free( hashlist );
 	//for ( ... ) free( pp.tlist );
