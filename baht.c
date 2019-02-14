@@ -22,6 +22,12 @@
  * 
  * TODO
  * ----
+
+ - either curl or single to make requests and return what came back
+ - directory listing to pull multiple files or locations?
+ - change hashing to use different level indicators (e.g. div[1,2] vs div)
+
+
  - email when done
  - stream to db
  - add options 
@@ -348,23 +354,24 @@ int load_page ( const char *file, char **dest, int *destlen ) {
 }
 
 
-//Grab a page and write to buffer
-int load_www ( const char *address, unsigned char *dest, int *destlen ) {
-
+//Grab a URI and write to buffer
+int load_www ( const char *address, unsigned char **dest, int *destlen ) {
 	int fn;
 	struct stat sb;
 
+#if 0
 	//Can make a raw socket connection, but should use cURL for it...
 	//....
+	//connect( );
+	//I can use single for this... do a HEAD, then do a GET
+	//socket_connect( &sk (	
 
-#if 0
 	//Read the file into buffer	
 	if ( read( fn, dest, sb.st_size ) == -1 ) {
 		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
 		return 0; 
 	}
 #endif
-
 	*destlen = 0;
 	return 1;
 }
@@ -746,10 +753,17 @@ int main( int argc, char *argv[] ) {
 	}
 	else if ( opt_set( opts, "--url" ) ) {
 		srcsrc = opt_get( opts, "--url" ).s;
-		;//load_www( srcsrc, &block, &len );
+		load_www( srcsrc, (unsigned char **)&block, &len );
 		*p = (char *)block;
 		return RERR( PROG ": URLS just don't work right now.  Sorry... :)" );	
 	}
+	#ifdef DEBUG
+	else if ( 0 ) {
+		//Load from a static buffer in memory somewhere
+		block = (char *)yamama;
+		len = strlen( block );
+	}
+	#endif
 	#if 0
 	//Open a directory?
 	else if ( opt_set( opts, "--directory" ) ) {
@@ -759,15 +773,6 @@ int main( int argc, char *argv[] ) {
 		*p = (char *)block;
 	}
 	#endif
-	#ifdef DEBUG
-	else if ( 0 ) {
-		//Load from a static buffer in memory somewhere
-		block = (char *)yamama;
-		len = strlen( block );
-	}
-	#endif
-
-	//
 
 	//Loop through things
 	while ( *p ) {	
