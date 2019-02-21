@@ -758,41 +758,60 @@ fprintf( stderr, "fuck is wrong with this?\n" );
 int undupify ( LiteKv *kv, int i, void *p ) {
 	Simp *sk = (Simp *)p;
 	LiteValue vv = kv->value;
-	fprintf( stderr, "%p, %p, %ld\n", sk->tlist, sk->top, (sk->tlistLen * sizeof(Table *)) );
 
-	if ( kv->key.type == LITE_TRM ) { 
-		sk->ind--;	
+	//Print
+	for ( int i=0; i<sk->tlistLen; i++ ) {
+		Table *t = sk->tlist[i];
+		fprintf( stderr, "%p%s, ", t, sk->top == t ? "(*)" : "" );
 	}
-	else if ( kv->value.type == LITE_TBL ) {
-		sk->ind++;
-		if ( sk->ind > sk->max ) {
-			Table *tn = malloc(sizeof(Table));
-			memset( tn, 0, sizeof(Table));
-			lt_init( tn, NULL, 64 ); 
-			ADD_ELEMENT( sk->tlist, sk->tlistLen, Table *, tn );
-			sk->max++;
-		}
-	}
+	fprintf( stderr, "\n" );
 
-	if ( sk->ind == 0 || sk->ind > 0 ) {
-		sk->top = sk->tlist[ sk->ind ];
-	}
 
+	//The key should be here...
 	if ( kv->key.type == LITE_TXT ) {
-#if 1
-		int at = 0;
-		if (( at = lt_geti( sk->top, kv->key.v.vchar )) == -1 ) {
+		int at = 0, *inc = NULL;
+		if (( at = lt_geti( sk->top, kv->key.v.vchar )) > -1 ) {
+			inc = (int *)lt_userdata_at( sk->top, at );
+			(*inc)++;
+			//fprintf( stderr, "int is: %d\n", *inc );
+			fprintf( stderr, "dupkey found, writing '%s%d'\n", kv->key.v.vchar, *inc );
+		
+			//write a new value
+			char buf[1024] = {0};
+			snprintf( buf, 1023, "%s%d", kv->key.v.vchar, *inc );
+			free( kv->key.v.vchar );
+
+			kv->key.v.vchar = strdup( buf );
+		}
+		else {
 			lt_addtextkey( sk->top, kv->key.v.vchar );		
-			lt_addintvalue( sk->top, 0 );
+			inc = malloc( sizeof(int) );
+			*inc = 0;
+			lt_addudvalue( sk->top, inc );
 			lt_finalize( sk->top );
 			lt_lock( sk->top );
 		}
-		else {
-
-		}
+		fprintf( stderr, "key (%d) %s\n", at, kv->key.v.vchar );
 		lt_dump( sk->top );
-#endif
 	}	
+
+//getchar();
+	//Then you figure out what to do.
+	if ( kv->key.type == LITE_TRM ) { 
+		sk->ind--;	
+		sk->tlistLen--;
+		free( sk->top );
+		sk->top = NULL;
+		sk->top = sk->tlist[ sk->ind ];
+	}
+	else if ( kv->value.type == LITE_TBL ) {
+		sk->ind++;
+		Table *tn = malloc(sizeof(Table));
+		memset( tn, 0, sizeof(Table));
+		lt_init( tn, NULL, 64 ); 
+		ADD_ELEMENT( sk->tlist, sk->tlistLen, Table *, tn );
+		sk->top = sk->tlist[ sk->ind ];
+	}
 
 	return 1;
 }
@@ -807,14 +826,14 @@ int build_ctck ( Table *tt, Table *ct, int start ) {
 	//Allocate the first entry
 	Table *ft = malloc( sizeof(Table) );
 	memset(ft,0,sizeof(Table));
-	//TODO: This isn't really safe.  looks cool, though ;)
+	lt_init( ft, NULL, 64 );
 	sk.tlist = malloc( sizeof( Table * ) );
-	*sk.tlist = ft;
+	sk.top = *sk.tlist = ft;
 	sk.tlistLen++;
 
 	//
 	lt_exec_complex( tt, start + 1, tt->count, &sk, undupify );
-
+	lt_dump( tt );
 #if 0
 	//Dump the Simp structure...
 	//...	
