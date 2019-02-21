@@ -12,7 +12,7 @@ SQLBIN=sqlcmd
 
 # go - Build the 'baht' scraper tool
 go: vendor/single.o
-	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME)
+	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
 
 #$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
 
