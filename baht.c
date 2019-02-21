@@ -778,13 +778,14 @@ int undupify ( LiteKv *kv, int i, void *p ) {
 	Simp *sk = (Simp *)p;
 	LiteValue vv = kv->value;
 
+#if 0
 	//Print
 	for ( int i=0; i<sk->tlistLen; i++ ) {
 		Table *t = sk->tlist[i];
 		fprintf( stderr, "%p%s, ", t, sk->top == t ? "(*)" : "" );
 	}
 	fprintf( stderr, "\n" );
-
+#endif
 
 	//The key should be here...
 	if ( kv->key.type == LITE_TXT ) {
@@ -793,13 +794,12 @@ int undupify ( LiteKv *kv, int i, void *p ) {
 			inc = (int *)lt_userdata_at( sk->top, at );
 			(*inc)++;
 			//fprintf( stderr, "int is: %d\n", *inc );
-			fprintf( stderr, "dupkey found, writing '%s%d'\n", kv->key.v.vchar, *inc );
+			//fprintf( stderr, "dupkey found, writing '%s%d'\n", kv->key.v.vchar, *inc );
 		
 			//write a new value
 			char buf[1024] = {0};
 			snprintf( buf, 1023, "%s%d", kv->key.v.vchar, *inc );
 			free( kv->key.v.vchar );
-
 			kv->key.v.vchar = strdup( buf );
 		}
 		else {
@@ -810,11 +810,10 @@ int undupify ( LiteKv *kv, int i, void *p ) {
 			lt_finalize( sk->top );
 			lt_lock( sk->top );
 		}
-		fprintf( stderr, "key (%d) %s\n", at, kv->key.v.vchar );
-		lt_dump( sk->top );
+		//fprintf( stderr, "key (%d) %s\n", at, kv->key.v.vchar );
+		//lt_dump( sk->top );
 	}	
 
-//getchar();
 	//Then you figure out what to do.
 	if ( kv->key.type == LITE_TRM ) { 
 		sk->ind--;	
@@ -855,6 +854,16 @@ int build_ctck ( Table *tt, int start, int end ) {
 	//lt_dump( tt );
 	return 1;
 }
+
+
+
+#if 0
+//TODO: use a single function instead of both build_ctck and build_individual
+//Build individual table with unique keys
+int build_uindividual ( LiteKv *kv, int i, void *p ) {
+	return 0;
+}
+#endif
 
 
 
@@ -1086,18 +1095,11 @@ int main( int argc, char *argv[] ) {
 			//TODO: For our purposes, 5743 is the final node.  Fix this.
 			int start = pp.hlist[ i ];
 			int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
-			//TODO: Add 'lt_get_optimal_hash_size( ... )'
-			//int oz = lt_get_optimal_hz( int );
 
 			//Create a table to track occurrences of hashes
-			//build_ctck( tt, start, end - 1 ); 
-			//lt_lock( tt );
-//lt_dump( tt );
-//exit( 0 );
-//getchar();
+			build_ctck( tt, start, end - 1 ); 
 
-			//TODO: Got to figure out what the issue is here, something having 
-			//to do with lt_init.  Allocate a table (or five)
+			//TODO: Simplify this
 			Table *th = malloc( sizeof(Table) );
 			lt_init( th, NULL, 7777 );
 			ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
@@ -1105,12 +1107,8 @@ int main( int argc, char *argv[] ) {
 
 			//Create a new table
 			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
-//fprintf( stderr, "%p\n", pp.ctable );
-lt_dump( pp.ctable );
-exit( 0 );
-			//lt_lock( pp.ctable );
-			//lt_free( pp.checktable );
-exit( 0 );
+			lt_lock( pp.ctable );
+			lt_dump( pp.ctable );
 		}
 
 		//Destroy the source table. 
@@ -1119,8 +1117,8 @@ exit( 0 );
 		//Now check that each table has something
 		for ( int i=0; i<pp.tlistLen; i++ ) {
 			Table *tl = pp.tlist[ i ];
-			//lt_kdump( tl );
 
+			//TODO: Simplify this, by a large magnitude...
 			//Hash check on dem bi	
 			yamlList *tn = testNodes;
 			int baLen = 0, vLen = 0, mtLen = 0;
@@ -1159,6 +1157,8 @@ exit( 0 );
 				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
 				fprintf( stderr, "%s\n", fbuf );
 			}
+
+			lt_free( tl );
 		}
 
 		p++;
