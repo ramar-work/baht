@@ -961,16 +961,14 @@ typedef enum {
 } LiteType;
 
 
-struct LiteTable 
-{
+struct LiteTable {
   uint32_t  count;
   long      ptr;
   LiteTable *parent;
 };
 
 
-typedef struct 
-{
+typedef struct {
   unsigned int  total  ,     //Size allocated (the bound)
                 modulo ,     //Optimal modulus value for hashing
                 index  ,     //Index to current element

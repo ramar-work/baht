@@ -14,6 +14,7 @@
  * Flags 
  * -----
  * -DDEBUG - Show debugging information 
+ * -DHASHTYPE_* - Compile with different hash schemes? 
  * 
  * Author
  * ------
@@ -72,17 +73,20 @@
 	*(&ptr[ ptrListSize ]) = element; \
 	ptrListSize++;
 
-#define SET_INNER_PROC(p, t, rn, jn, fk) \
+#define SET_INNER_PROC(p, t, rn, jn, fk, rk) \
 	InnerProc p = { \
 		.parent   = lt_retkv( t, rn ) \
 	 ,.srctable = t \
 	 ,.jump = jn \
 	 ,.key  = fk \
+	 ,.rkey  = rk \
+	 ,.level = 0 \
 	 ,.keylen = strlen( fk ) \
 	 ,.tlist = NULL \
 	 ,.tlistLen = 0 \
 	 ,.hlist = NULL \
 	 ,.hlistLen = 0 \
+	 ,.checktable = NULL \
 	}
 
 const char *errMessages[] = {
@@ -134,15 +138,22 @@ typedef struct useless_structure {
 	int rootNode;
 	int jumpNode;
 	int jump;
+	int level;
 	char *key;
+	char *rkey;
 	int keylen;
 	int hlistLen;
 	int *hlist;
 	int tlistLen;
 	Table **tlist;
 	Table *ctable;
+	Table *checktable;
 } InnerProc;
 
+
+typedef struct lazy {
+	short ind, len;//, *arr;
+} oCount; 
 
 
 //Things we'll use
@@ -261,6 +272,7 @@ yamlList attrNodes[] = {
 //Test data
 const char *html_1 = "<h1>Hello, World!</h1>";
 const char html_file[] = "files/carri.html";
+#if 0
 const char yamama[] = ""
 "<html>"
 	"<body>"
@@ -275,6 +287,34 @@ const char yamama[] = ""
 	"</body>"
 "</html>"
 ;
+#else
+const char yamama[] = ""
+"<html>"
+	"<body>"
+	"<div>"
+		"<h2>Snazzy</h2>"
+		"<p>The jakes is coming</p>"
+		"<div>"
+			"<p>The jakes are still chasing me</p>"
+			"<div>"
+				"<p>Son, why these dudes still chasing me?</p>"
+				"<p>Bro, why these dudes still chasing me?</p>"
+				"<p>Damn, why these dudes still chasing me?</p>"
+			"</div>"
+		"</div>"
+		"<div>"
+			"<p>The jakes are still chasing me</p>"
+			"<div>"
+				"<p>Son, why these dudes still chasing me?</p>"
+				"<p>Bro, why these dudes still chasing me?</p>"
+				"<p>Damn, why these dudes still chasing me?</p>"
+			"</div>"
+		"</div>"
+	"</div>"
+	"</body>"
+"</html>"
+;
+#endif
 #endif
 
 
@@ -358,7 +398,6 @@ int load_page ( const char *file, char **dest, int *destlen ) {
 int load_www ( const char *address, unsigned char **dest, int *destlen ) {
 	int fn;
 	struct stat sb;
-
 #if 0
 	//Can make a raw socket connection, but should use cURL for it...
 	//....
@@ -438,7 +477,6 @@ char *retblock ( GumboNode *node ) {
 //TODO: Add element count 
 //TODO: Add filter for element count
 int gumbo_to_table ( GumboNode *node, Table *tt ) {
-
 	//Loop through the body and create a "Table" 
 	GumboVector *bc = &node->v.element.children;
 	int stat = 0;
@@ -453,6 +491,7 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 		//Handle what to do with the actual node
 		//TODO: Handle GUMBO_NODE_[CDATA,COMMENT,DOCUMENT,WHITESPACE,TEMPLATE]
 		if ( n->type != GUMBO_NODE_TEXT && n->type != GUMBO_NODE_ELEMENT ) {
+			0;
 			//User selected handling can take place here, usually a blank will do
 			//twoSided = 0; 
 			//lt_addnullvalue( t, itemname );
@@ -479,7 +518,15 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 			memset( item_cname, 0, maxlen ); 
 			char *iname = itemname;
 
-			//This newest change will add an Id or class to a hash
+			//the number of children is not enough.
+			//you need to check the children and see if any are elemnts, or even better yet,
+			//if they share the same tag name (and same hash name)
+
+	#if 0
+			fprintf( stderr, "L: %d\n", gv->length );
+				getchar();
+	#else
+			//Add an id or class to a hash
 			if ( gattr->length ) {
 				if ( ( attr = gumbo_get_attribute( gattr, "id" ) ) ) {
 					//fprintf( stderr, "id is: #%s\n", attr->value );	
@@ -493,6 +540,7 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 					iname = item_cname;
 				}
 			}
+	#endif
 
 			//Should always add this first
 			lt_addtextkey( tt, iname );
@@ -512,14 +560,6 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 				lt_ascend( tt );
 			}
 
-		#if 0
-			if ( !gv->length ) {
-				lt_addtextkey( tt, "text" );	
-				lt_addtextvalue( tt, "(nothing)" );	
-				lt_finalize( tt );
-			}
-			else {
-		#endif
 			if ( gv->length ) {
 				gumbo_to_table( n, tt );
 			}
@@ -528,7 +568,6 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 		}
 	}
 
-	lt_lock( tt );
 	return 1;
 }
 
@@ -540,6 +579,7 @@ int parse_html ( Table *tt, char *block, int len ) {
 	GumboOutput *output = gumbo_parse_with_options( &kGumboDefaultOptions, (char *)block, len ); 
 	GumboVector *children = &(output->root)->v.element.children;
 	GumboNode *body = find_tag( output->root, GUMBO_TAG_BODY );
+write(2,block,len);
 
 	if ( !body ) {
 		fprintf( stderr, PROG ": no <body> found!\n" );
@@ -554,6 +594,9 @@ int parse_html ( Table *tt, char *block, int len ) {
 
 	//Parse the document into a Table
 	int elements = gumbo_to_table( body, tt );
+//lt_dump( tt );
+	//lt_geti( tt );
+	lt_lock( tt );
 
 	//Free the gumbo struture 
 	gumbo_destroy_output( &kGumboDefaultOptions, output );
@@ -591,41 +634,281 @@ int extract_same ( LiteKv *kv, int i, void *p ) {
 }
 
 
+//At a specific level, find all of the keys that match
+//NOTE: This is only run with tables that have two or more children 
+int check_same_level ( LiteKv *kv, int i, void *p ) {
+	//Loop through until you hit a terminator???, but what do you do?
+	if ( kv->key.type == LITE_TRM )
+		return 0;
+	else if ( kv->key.type == LITE_TXT ) {
+	}
+getchar();
+	return 1;
+}
+
+
+//
+static int stCount = 0;
+int build_checktable ( LiteKv *kv, int i, void *p ) {
+	InnerProc *pi = (InnerProc *)p;
+	Table *kt = pi->checktable;	
+
+	//Only save text keys, and increment the bool count if something was there.
+	if ( kv->key.type == LITE_TXT && kv->value.type == LITE_TBL ) {
+
+		//Write and manipulate buffers.
+		unsigned char fkBuf[ 2048 ] = { 0 }; 
+		char *fk = (char *)lt_get_full_key( pi->srctable, i, fkBuf, sizeof(fkBuf) - 1 );
+
+		//TODO: This is pretty ugly, I see why the . is missed, but I assume that 
+		//the embedded nul stops us from getting the right count in other cases.
+		int jumpBy = memcmp( fk, pi->rkey, strlen( fk ) ) + 2;
+		char *sk = &fk[ jumpBy ];
+		int found=0;
+
+		//DPRINTF( stderr, "%d: %s; %d\n", i, fk, lt_geti( kt, fk ) );
+		if ( fk && (found = lt_geti( kt, sk )) > -1 )  {
+			oCount *pp = (oCount *)lt_userdata_at( kt, found );
+			pp->len++;
+		}
+		else {
+			//The first time we find it, it's just 0.  
+			//lt_addtextkey( kt, kv->key.v.vchar );
+			//fprintf( stderr, "writing val from ptr: %d\n", stCount );
+			lt_addtextkey( kt, sk );
+			oCount *pp = malloc( sizeof( oCount ) );
+			pp->ind = 0;
+			pp->len = 0;
+			lt_addudvalue( kt, pp );
+			lt_finalize( kt );
+			lt_lock( kt );
+		}
+	}
+	return 1;
+}
+
+
+//...
+int check_checktable ( LiteKv *kv, int i, void *p ) {
+	if ( kv->key.type == LITE_TXT ) {
+		oCount *ph = kv->value.v.vusrdata;
+		fprintf( stderr, "%s -> len: %d\n", kv->key.v.vchar, ph->len );
+	}
+	return 1;
+}
+
+
+//Approximate where something is, by checking the similarity of its parent
+typedef struct simp { 
+	LiteTable *parent; //Check the parent at this stage 
+	Table *ct;         //The check table as we go
+	int tlistLen, ind, max;
+	Table **tlist;     //Now, we need more than one check table, doing it this way anyway
+	Table *top;      //Can't remember if I can trade ptrs or not...
+} Simp;
+
+
+
+#if 0
+//This function extracts keys at the same level, 
+//and will return an int array with indexes where dups are found 
+int til_parents_match ( LiteKv *kv, int i, void *p ) {
+	Simp *sk = (Simp *)p;
+	LiteValue vv = kv->value; 
+#if 1
+	fprintf( stderr, "%s -> %s\n", kv->key.v.vchar, lt_typename( kv->value.type ) );
+#endif
+	if ( kv->value.type == LITE_TBL && sk->parent == vv.v.vtable.parent )
+		return 0;
+	else if ( kv->value.type == LITE_TBL ) {
+		fprintf( stderr, "%p %c= %p\n", sk->parent, 
+			sk->parent == vv.v.vtable.parent ? '=' : '!', vv.v.vtable.parent ); 
+		sk->ind++;
+	}
+	else if ( kv->key.type == LITE_TRM )
+		sk->ind--;
+	else if ( !sk->ind && kv->key.type == LITE_TXT ) {
+		//You can add ints to the structure?
+		//You can check the strings (and should here)
+		fprintf( stderr, "%s\n", kv->key.v.vchar );
+		//do you keep hashing?  do you check against other values? 
+		//using a check table once should do it
+		fprintf( stderr, "%p\n", sk->ct );
+
+		int at=0;
+		//if the key already exists.
+		if ((at = lt_geti( sk->ct, kv->key.v.vchar )) == -1) {
+fprintf( stderr, "fuck is wrong with this?\n" );
+			lt_addtextkey( sk->ct, kv->key.v.vchar );
+			lt_addintvalue( sk->ct, 0 );
+			lt_finalize( sk->ct );
+		} 
+		else {
+fprintf( stderr, "fuck is wrong with this?\n" );
+		}	
+		fprintf( stderr, "%s @ %d\n", kv->key.v.vchar, at );
+	}	
+
+	return 1;
+}
+#endif
+
+
+//An iterator
+int undupify ( LiteKv *kv, int i, void *p ) {
+	Simp *sk = (Simp *)p;
+	LiteValue vv = kv->value;
+	fprintf( stderr, "%p, %p, %ld\n", sk->tlist, sk->top, (sk->tlistLen * sizeof(Table *)) );
+
+	if ( kv->key.type == LITE_TRM ) { 
+		sk->ind--;	
+	}
+	else if ( kv->value.type == LITE_TBL ) {
+		sk->ind++;
+		if ( sk->ind > sk->max ) {
+			Table *tn = malloc(sizeof(Table));
+			memset( tn, 0, sizeof(Table));
+			lt_init( tn, NULL, 64 ); 
+			ADD_ELEMENT( sk->tlist, sk->tlistLen, Table *, tn );
+			sk->max++;
+		}
+	}
+
+	if ( sk->ind == 0 || sk->ind > 0 ) {
+		sk->top = sk->tlist[ sk->ind ];
+	}
+
+	if ( kv->key.type == LITE_TXT ) {
+#if 1
+		int at = 0;
+		if (( at = lt_geti( sk->top, kv->key.v.vchar )) == -1 ) {
+			lt_addtextkey( sk->top, kv->key.v.vchar );		
+			lt_addintvalue( sk->top, 0 );
+			lt_finalize( sk->top );
+			lt_lock( sk->top );
+		}
+		else {
+
+		}
+		lt_dump( sk->top );
+#endif
+	}	
+
+	return 1;
+}
+
+
+//a simpler way MIGHT be this
+//this should return/stop when the terminator's parent matches the checking parent 
+int build_ctck ( Table *tt, Table *ct, int start ) {
+	LiteKv *kv = lt_retkv( tt, start );
+	Simp sk = { &kv->parent->value.v.vtable, ct, 0, 0, 0, NULL };
+
+	//Allocate the first entry
+	Table *ft = malloc( sizeof(Table) );
+	memset(ft,0,sizeof(Table));
+	//TODO: This isn't really safe.  looks cool, though ;)
+	sk.tlist = malloc( sizeof( Table * ) );
+	*sk.tlist = ft;
+	sk.tlistLen++;
+
+	//
+	lt_exec_complex( tt, start + 1, tt->count, &sk, undupify );
+
+#if 0
+	//Dump the Simp structure...
+	//...	
+	while ( *sk.tlist ) {
+		fprintf( stderr, "%p\n", *sk.tlist );
+		Table *t = *sk.tlist;
+		lt_dump( t ); 
+		sk.tlist++;
+	}
+#endif
+	
+	return 1;
+}
+
+
+
 //Pass through and build a smaller subset of tables
 int build_individual ( LiteKv *kv, int i, void *p ) {
-	//Deref and get the first table in the list.
+	//Set refs
 	InnerProc *pi = (InnerProc *)p;
-	//Table *ct = *pi->tlist;
-	Table *ct = pi->ctable;
-
-	//Get type of value, save accordingly.
-	LiteType kt = kv->key.type;
-	LiteType vt = kv->value.type;
+	LiteType kt = kv->key.type, vt = kv->value.type;
+	fprintf( stderr, "%s, %s\n", lt_typename(kt), lt_typename(vt) );
 
 	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
-		lt_addintkey( ct, (kt==LITE_INT) ? kv->key.v.vint : kv->key.v.vfloat );	
+		lt_addintkey( pi->ctable, (kt==LITE_INT) ? kv->key.v.vint : kv->key.v.vfloat );	
 	else if ( kt == LITE_BLB )
-		lt_addblobkey( ct, kv->key.v.vblob.blob, kv->key.v.vblob.size );	
-	else if ( kt == LITE_TXT )
-		lt_addtextkey( ct, kv->key.v.vchar );	
+		lt_addblobkey( pi->ctable, kv->key.v.vblob.blob, kv->key.v.vblob.size );	
 	else if ( kt == LITE_TRM ) {
-		lt_ascend( ct );
+		pi->level --;
+		lt_ascend( pi->ctable );
 		return 1;
+	}
+	else if ( kt == LITE_TXT ) {
+	#if 1
+		//Add regular old keys, maybe...
+		if ( vt != LITE_TBL ) {
+			lt_addtextkey( pi->ctable, kv->key.v.vchar );	
+		}
+		//Check for similar keys
+		else {
+			if ( kv->value.v.vtable.count > 1 ) {
+				printf( "echoing tab\n" );
+				//if an int is sent, then I'll know what level I'm at...
+				//extract_key( pi->srctable, i );
+				//exit( 0 );
+				getchar();
+			}
+		}
+
+	#else
+		//Define references
+		char *sk=NULL, *fk=NULL, fkBuf[ 2048 ]={0};
+
+		//Get the entire key, and check for existence
+		sk = fk = (char *)lt_get_full_key( st, i, (uint8_t *)fkBuf, sizeof(fkBuf) - 1 );
+
+		//TODO: Be extremely careful here, probably should add a check for if
+		//the value is a table or not
+		//TODO: This is harder than it should be
+		int jumpBy = memcmp( fk, pi->rkey, strlen( fk ) ) + 2;
+		sk = &fk[ jumpBy ];
+		oCount *oy = lt_userdata_at( ckt, lt_geti( ckt, sk ) );
+
+		//If a hash was not found, this is "unique" table, so just write.
+		if ( !oy || !oy->len ) {
+			lt_addtextkey( ct, sk );
+		}
+		else {
+			//If one was found, make the hash "unique"
+			//TODO: Add other methods for this
+			char mb[ 2048 ]={ 0 }; 
+			snprintf( mb, sizeof(mb) - 1, "%s%d", sk, oy->ind );
+			sk = mb;
+			lt_addtextkey( ct, sk );
+			oy->ind ++;
+		}
+	#endif
 	}
 
 	//Save value 
 	if ( vt == LITE_INT || vt == LITE_FLT ) 
-		lt_addintvalue( ct, kv->value.v.vint );	
+		lt_addintvalue( pi->ctable, kv->value.v.vint );	
 	else if ( vt == LITE_BLB)
-		lt_addblobvalue( ct, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
+		lt_addblobvalue( pi->ctable, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
 	else if ( vt == LITE_TXT )
-		lt_addtextvalue( ct, kv->value.v.vchar );	
+		lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
 	else if ( vt == LITE_TBL ) {
-		lt_descend( ct );
+		pi->level ++;
+		fprintf( stderr, "%p\n", &kv->value.v.vtable );
+		lt_descend( pi->ctable );
 		return 1;
 	}
-	lt_finalize( ct );
+	lt_finalize( pi->ctable );
 	return 1;
 }
 
@@ -704,6 +987,7 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList *tn, int *len ) {
 }
 
 
+//
 Option opts[] = {
 	{ "-f", "--file", "Get a file on the command line.", 's' }
  ,{ "-u", "--url",  "Get something from the WWW", 's' }
@@ -728,7 +1012,7 @@ struct Cmd {
 int main( int argc, char *argv[] ) {
 
 	//Process some options
-	(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);
+	//(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);
 
 	//Define references
 	int len=0;
@@ -740,6 +1024,15 @@ int main( int argc, char *argv[] ) {
 	char **p = psrc;
 
 	//Get source somewhere.
+	#if 1
+	if ( 1 ) {
+		//Load from a static buffer in memory somewhere
+		block = (char *)yamama;
+		len = strlen( block );
+		*p = (char *)block;
+	}
+	else
+	#endif
 	if ( opt_set( opts, "--file" ) ) {
 	#if 0
 		srcsrc = (char *)html_file;
@@ -757,13 +1050,6 @@ int main( int argc, char *argv[] ) {
 		*p = (char *)block;
 		return RERR( PROG ": URLS just don't work right now.  Sorry... :)" );	
 	}
-	#ifdef DEBUG
-	else if ( 0 ) {
-		//Load from a static buffer in memory somewhere
-		block = (char *)yamama;
-		len = strlen( block );
-	}
-	#endif
 	#if 0
 	//Open a directory?
 	else if ( opt_set( opts, "--directory" ) ) {
@@ -776,20 +1062,26 @@ int main( int argc, char *argv[] ) {
 
 	//Loop through things
 	while ( *p ) {	
+		//*p can point to either a block of bytes, or be a file name or url
+		//TODO: add a way to differentiate the types here
 
-	#if 1
-		//This is a test
 		//Create a hash table out of the expected keys.
 		if ( !yamlList_to_table( expected_keys, &tex ) )
 			return RERR( PROG ": Failed to create hash list.\n" );
-	#endif
 
 		//Create an HTML hash table
 		if ( !parse_html( tt, block, len ) )
 			return RERR( PROG ": Couldn't parse HTML to hash Table.\n" );
 
+lt_dump( tt ); 
+//build the block here, in a different way
+Table tpk; lt_init(&tpk, NULL, 200 ); 
+build_ctck( tt, &tpk, 0 ); 
+exit(0);
+
 		//Set some references
 		unsigned char fkbuf[ 2048 ] = { 0 };
+		unsigned char rkbuf[ 2048 ] = { 0 };
 		int rootNode, jumpNode, activeNode;
 		NodeSet *root = &nodes[ 0 ].rootNode,  *jump = &nodes[ 0 ].jumpNode; 
 
@@ -808,7 +1100,8 @@ int main( int argc, char *argv[] ) {
 
 		//Get parent and do work.
 		char *fkey = (char *)lt_get_full_key( tt, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
-		SET_INNER_PROC(pp, tt, rootNode, jumpNode, fkey );
+		char *rkey = (char *)lt_get_full_key( tt, rootNode, rkbuf, sizeof(rkbuf) - 1 );
+		SET_INNER_PROC(pp, tt, rootNode, jumpNode, fkey, rkey );
 
 		//Start the extraction process 
 		lt_exec( tt, &pp, extract_same );
@@ -830,9 +1123,29 @@ int main( int argc, char *argv[] ) {
 			ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
 			pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
 
+			//Create a table to track occurrences of hashes
+#if 1
+			Table tk;
+			lt_init( &tk, NULL, 777 );
+			pp.checktable = &tk;
+
+			build_ctck( tt, &tk, start ); 
+			//lt_exec_complex( tt, start, end - 1, &pp, build_checktable );
+#endif
+getchar();
+exit( 0 );
+			//extract_key( tt, NULL, start, end - 1 );
+			//lt_exec_complex( tt, start, end - 1, &pp, ww );
+			//lt_exec( pp.checktable, NULL, check_checktable );
+
 			//Create a new table
 			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
-			lt_lock( pp.ctable );
+fprintf( stderr, "%p\n", pp.ctable );
+lt_dump( pp.ctable );
+exit( 0 );
+			//lt_lock( pp.ctable );
+			//lt_free( pp.checktable );
+exit( 0 );
 		}
 
 		//Destroy the source table. 

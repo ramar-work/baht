@@ -14,6 +14,8 @@ SQLBIN=sqlcmd
 go: vendor/single.o
 	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME)
 
+#$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
+
 # explain - List all the targets and what they do
 explain:
 	@printf 'Available options are:\n'

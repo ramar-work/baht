@@ -1754,18 +1754,17 @@ LiteRecord *lt_ret (Table *t, LiteType type, int index) {
 	}
 #if 0
 	}
-	else 
-	{
-		if ( index <= -1 || index < t->start || index > t->end )
-		{
+	else {
+		if ( index <= -1 || index < t->start || index > t->end ) {
 			t->error = ERR_LT_OUT_OF_SLICE;
 			return (LiteRecord *)supernul;
 		}	
 	}
 #endif	
 
-	if ( (t->head + index)->value.type != type ) 
+	if ( (t->head + index)->value.type != type ) { 
 		return (LiteRecord *)supernul; 
+	}
 
 	return &(t->head + index)->value.v; 
 }
@@ -2019,18 +2018,15 @@ Table *lt_copy (Table *dest, Table *src, int from, int to, int weak) {
 
 
 //Get a key or value somewhere
-void lt_free (Table *t) 
-{	
+void lt_free (Table *t) {	
 	//Free any text keys
-	for ( int ii=0; ii < t->index; ii++ )
-	{
+	for ( int ii=0; ii < t->index; ii++ ) {
 		LiteKv *k = t->head + ii;
 		( k->key.type == LITE_TXT ) ? free( k->key.v.vchar ), k->key.v.vchar = NULL : 0;
 		( k->value.type == LITE_TXT ) ? free( k->value.v.vchar ), k->value.v.vchar = NULL : 0;
 	}
 
-	if ( t->mallocd )
-	{
+	if ( t->mallocd ) {
 		free( t->head );
 		t->head   = NULL;	
 		t->error  = 0;
@@ -2041,8 +2037,7 @@ void lt_free (Table *t)
 		t->mallocd= 0;
 	}
 
-	if ( t->srcmallocd /*t->src*/ )
-	{
+	if ( t->srcmallocd /*t->src*/ ) {
 		free( t->src );
 		t->src = NULL;
 	}
@@ -2196,50 +2191,13 @@ int lt_exec_complex (Table *t, int start, int end, void *p, int (*fp)( LiteKv *k
 
 
 
-// If I pulled things out, ...
-typedef struct TableMeta {
-	//where does what I'm asking for start?
-	//specifically what is there? (4 tables, 1 text?)
-
-	//or should this just be range of values? 
-	//int start = a, int end = b; for ( int aa = start; aa<end; aa++ )
-	//
-	//this can be calculated with just a hash ( e.g. GetTableMeta( t, 123 )
-	//-> returns TableMeta tt = { start = 13, end = 23 }
-
-	//a step further for this thing would be something like 
-	//GetTableMeta( t, 123, "word1", "word2" )
-	//
-	//word1 and word2 would both come out in the structure as incrementors
-	//e.g this function would get hash of the key word1 and then find all other
-	//keys of word1.  provided that these keys were equidistant from each other,
-	//only an incrementor should need to come back. 
-	// .incrementor might be 3 for word1, so each new loop would go up by 3
-	// for ( int i=start; i<end; i += inc )
-	//
-	//if the keys  were not equidistant then I'd have to
-	//allocate x amount of ints for the different distances
-	//
-	// [ 2, 3, 7, 8, 13, 17, 18 ] ...
-
-	int start, end;
-} TableMeta;
-
-
-void lt_wtf ( Table *t, TableMeta *tm ) {
-
-}
-
-
 #ifdef DEBUG_H 
 //Get a key or value somewhere
-void lt_printall ( Table *t ) 
-{
+void lt_printall ( Table *t ) {
 	//Header
 	fprintf( stderr, fmt, "Index", "KType", "VType", "Value", "CombinedValue", "HashOf", "Hashes" );
 
-	for ( int ii=0; ii < t->index; ii++ )
-	{
+	for ( int ii=0; ii < t->index; ii++ ) {
 		LiteKv *k = t->head + ii;
 		LiteType kt;
 		int hash;	
@@ -2368,16 +2326,14 @@ fprintf(stderr, "mm->size: %d\n", mm->size);
 
 
 //Where exactly is a substr in memory
-int32_t memstrat (const void *a, const void *b, int32_t size) 
-{
+int32_t memstrat (const void *a, const void *b, int32_t size)  {
 	_Bool stop=1;
 	int32_t ct=0;//, occ=0;
 	uint8_t *aa = (uint8_t *)a;
 	uint8_t *bb = (uint8_t *)b;
 	int len     = strlen((char *)b);
 	//while (stop = (ct < (size - len)) && memcmp(aa + ct, bb, len) != 0) ct++; 
-	while (stop) 
-	{
+	while (stop) {
 		while ((stop = (ct < (size - len))) && memcmp(aa + ct, bb, 1) != 0) ct++;
 		if (memcmp(aa + ct, bb, len) == 0)
 			return ct; 
