@@ -666,8 +666,7 @@ getchar();
 	return 1;
 }
 
-
-//
+#if 0
 static int stCount = 0;
 int build_checktable ( LiteKv *kv, int i, void *p ) {
 	InnerProc *pi = (InnerProc *)p;
@@ -706,6 +705,7 @@ int build_checktable ( LiteKv *kv, int i, void *p ) {
 	}
 	return 1;
 }
+#endif
 
 
 //...
