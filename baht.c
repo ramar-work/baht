@@ -311,7 +311,7 @@ int load_www ( const char *address, unsigned char **dest, int *destlen ) {
 
 	//Read the file into buffer	
 	if ( read( fn, dest, sb.st_size ) == -1 ) {
-		fprintf( stderr, "%s: %s\n", PROG, strerror( errno ) );
+		fprintf( stderr, "%s: %s\n", strerror( errno ) );
 		return 0; 
 	}
 #endif
@@ -484,18 +484,12 @@ int parse_html ( Table *tt, char *b, int len ) {
 	GumboNode *body = find_tag( output->root, GUMBO_TAG_BODY );
 
 	//Stop with blank bodies
-	if ( !body ) {
-		//return err_set( 0, "no <body> found!" ); 	
-		fprintf( stderr, PROG ": no <body> found!\n" );
-		return 0;
-	}
+	if ( !body )
+		return err_set( 0, "%s", "no <body> tag found!" );
 
 	//Allocate a Table
-	if ( !lt_init( tt, NULL, 33300 ) ) {
-		//return err_set( 0, "couldn't allocate table!" ); 	
-		fprintf( stderr, PROG ": couldn't allocate table!\n" );
-		return 0;
-	}
+	if ( !lt_init( tt, NULL, 33300 ) )
+		return err_set( 0, "%s", "couldn't allocate table!" ); 	
 
 	//Parse the document into a Table
 	int elements = gumbo_to_table( body, tt );
@@ -622,7 +616,6 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Set refs
 	InnerProc *pi = (InnerProc *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
-	fprintf( stderr, "%s, %s\n", lt_typename(kt), lt_typename(vt) );
 
 	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
@@ -646,7 +639,7 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 		lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
 	else if ( vt == LITE_TBL ) {
 		pi->level ++;
-		fprintf( stderr, "%p\n", &kv->value.v.vtable );
+		//fprintf( stderr, "%p\n", &kv->value.v.vtable );
 		lt_descend( pi->ctable );
 		return 1;
 	}
@@ -685,12 +678,23 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList *tn, int *len ) {
 
 //Option
 Option opts[] = {
-	{ "-f", "--file", "Get a file on the command line.", 's' }
- ,{ "-u", "--url",  "Get something from the WWW", 's' }
- ,{ "-h", "--help", "Show help" }
+	{ "-f", "--file",          "Get a file on the command line.", 's' }
+ ,{ "-u", "--url",           "Get something from the WWW", 's' }
+ ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
+ ,{ "-k", "--show-full-key", "Show a full key"  }
+#if 0
+ ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
+#else
+ ,{ NULL, "--mysql",         "Choose MySQL as the SQL template." }
+ ,{ NULL, "--pgsql",         "Choose PostgreSQL as the SQL template." }
+ ,{ NULL, "--mssql",         "Choose SQL Server as the SQL template." }
+#endif
+ ,{ "-h", "--help",           "Show help" }
  ,{ .sentinel = 1 }
 };
-#if 0
+#if 1
+int optKeydump = 0;
+#else
 //Command loop
 struct Cmd {
 	const char *cmd;
@@ -704,6 +708,16 @@ struct Cmd {
 #endif
 
 
+int expandbuf ( char **buf, char *src, int *pos ) {
+	//allocate additional space
+	realloc( *buf, strlen( src ) );
+	memset( &buf[ *pos ], 0, strlen( src ) );
+	memcpy( &buf[ *pos ], src, strlen( src ) );
+	*pos += strlen( src );	
+	return 1;
+}
+
+
 //Much like moving through any other parser...
 int main( int argc, char *argv[] ) {
 
@@ -713,7 +727,8 @@ int main( int argc, char *argv[] ) {
 	//Define references
 	Table tex, src;
 	Table *tt = &src;
-	char *b = NULL, *sc = NULL, *ps[] = { NULL, NULL };
+	char *b = NULL, *sc = NULL, *yamlFile=NULL; 
+	char *ps[] = { NULL, NULL };
 	char **p = ps;
 	int len=0;
 
@@ -728,11 +743,13 @@ int main( int argc, char *argv[] ) {
 	else
 	#endif
 	if ( opt_set( opts, "--file" ) ) {
-		if ( !(sc = opt_get( opts, "--file" ).s) ) 
+		if ( !(sc = opt_get( opts, "--file" ).s) ) {
 			return err_print( 0, "%s", "No file specified." );	
+		}
 
-		if ( !load_page( sc, &b, &len ) ) 
+		if ( !load_page( sc, &b, &len ) ) {
 			return err_print( 0, "Error loading page '%s' - %s.", sc, _errbuf );
+		}
 
 		*p = (char *)b;
 	}
@@ -751,6 +768,47 @@ int main( int argc, char *argv[] ) {
 		*p = (char *)block;
 	}
 	#endif
+
+#if 1
+#else
+	optKeydump = opt_set( opts, "--show-key-dumps" ); 
+
+	if ( opt_set( opts, "--yaml" ) ) {
+		if ( !(yamlFile = opt_get(opts, "--yaml").s) ) {
+			return err_print( 0, "%s\n", "--yaml flag used, but no YAML file specified." );
+		}
+
+	#if 0	
+		//Parse the yaml file here...
+		if ( !(x = parseYaml( yamlFile )) ) {
+			return err_print( 0, "%s\n", "YAML parsing failed." );
+		}
+	#endif
+	}
+
+	#if 0
+	if ( !opt_set( opts, "--backend" ) ) 
+		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+	else {
+		const char efmt[] = "SQL backend not chosen (try --mssql, --mysql, or --pgsql)" );
+		return err_print( 0, "%s", efmt );
+	}
+	#else
+	if ( opt_set( opts, "--mysql" ) ) 
+		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+	else if ( opt_set( opts, "--pgsql" ) ) 
+		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+	else if ( opt_set( opts, "--mssql" ) ) 
+		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+	else {
+		return err_print( 0, "%s", "SQL backend not chosen (try --mssql, --mysql, or --pgsql)" );
+	} 
+	#endif
+#endif
+
+	if ( !*p ) {
+		return err_print( 0, "No --file or --url specified.  Nothing to do." );
+	}
 
 	//Loop through things
 	while ( *p ) {	
@@ -821,21 +879,25 @@ int main( int argc, char *argv[] ) {
 			Table *tl = pp.tlist[ i ];
 
 			//TODO: Simplify this, by a large magnitude...
-			//Hash check on dem bi	
 			yamlList *tn = testNodes;
 			int baLen = 0, vLen = 0, mtLen = 0;
-			char buf[ 200000 ] = { 0 };
+		#if 0
+			char *babuf=NULL, *vbuf=NULL, *fbuf=NULL;
+		#else
 			char babuf[ 20000 ] = {0};
 			char vbuf[ 100000 ] = {0};
 			char fbuf[ 120000 ] = {0};
+		#endif
 			const char fmt[] = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
 			yamlList **keys = find_keys_in_mt( tl, tn, &mtLen );
 
 			//Then loop through matched keys and values
 			while ( (*keys)->k ) {
-				//TODO: You may have to convert the resultant text to a typesafe value (int, etc)
-				//fprintf( stderr, "%s -> %s\n", (*keys)->k, (*keys)->v );
-				//Add bind args first 
+#if 0
+				expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
+				expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
+				keys++;
+#else
 				memcpy( &babuf[ baLen ], (*keys)->k, strlen( (*keys)->k ) ); 
 				baLen += strlen( (*keys)->k ); 
 
@@ -850,14 +912,22 @@ int main( int argc, char *argv[] ) {
 				memcpy( &babuf[ baLen ], ", ", 2 );
 				memcpy( &vbuf[ vLen ], ", ", 2 );
 				keys++, baLen+= 2, vLen+= 2; 
+#endif
 			} 
 
 			//Create a SQL creation string, if any hashes were found.
 			if ( mtLen > 1 ) {
+#if 0
+				babuf[ baLen-2 ]='\0', vbuf[ vLen-2 ]='\0';
+				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
+				free( babuf );
+				free( vbuf );
+#else
 				baLen -= 2, vLen -= 2;
 				babuf[ baLen ] = '\0';
 				vbuf[ vLen ] = '\0';
 				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
+#endif
 				fprintf( stderr, "%s\n", fbuf );
 			}
 

@@ -51,4 +51,6 @@ mysql-load: DBPASSWORD=""
 mysql-load:
 	$(SQLBIN) -u $(DBUSER) --password=$(DBPASSWORD) < example.mysql
 
-
+# listings - Make a database of listings
+listings:
+	printf ''
