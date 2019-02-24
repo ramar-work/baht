@@ -1,8 +1,8 @@
 # Makefile for this stupid script
 CC=gcc
-CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H #-DERRV_H
+CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 #-DERRV_H
 CC=clang
-CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H #-DERRV_H
+CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 #-DERRV_H
 NAME=baht
 DBSERVER="localhost"
 DATABASE=ctrial_db
@@ -13,6 +13,10 @@ SQLBIN=sqlcmd
 # go - Build the 'baht' scraper tool
 go: vendor/single.o
 	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
+
+# wop - Build the 'baht' scraper tool and run a dump 
+wop: vendor/single.o
+	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html --show-full-key
 
 #$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
 

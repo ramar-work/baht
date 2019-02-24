@@ -51,8 +51,17 @@
 #include <fcntl.h> 
 #include <string.h> 
 #endif
+#define LT_DEVICE 1 
+
 #include "vendor/single.h"
 #include <gumbo.h>
+
+#if 0
+#else
+ #include <lua.h>
+ #include <lualib.h>
+ #include <luaconf.h>
+#endif
 
 #define PROG "p"
 
@@ -242,9 +251,6 @@ void print_tlist ( Table **tlist, int len, Table *ptr ) {
 	}
 	fprintf( stderr, "\n" );
 }
-
-
-
 
 
 //Find a specific tag within a nodeset 
@@ -682,6 +688,7 @@ Option opts[] = {
  ,{ "-u", "--url",           "Get something from the WWW", 's' }
  ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
  ,{ "-k", "--show-full-key", "Show a full key"  }
+ ,{ "-s", "--sql",           "Dump SQL"  }
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -715,6 +722,15 @@ int expandbuf ( char **buf, char *src, int *pos ) {
 	memcpy( &buf[ *pos ], src, strlen( src ) );
 	*pos += strlen( src );	
 	return 1;
+}
+
+
+int loadyamlfile ( const char *file ) {
+	//load a yaml file
+	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
+	//or you can keep them in some kind of list
+	//that's weird, but it does work
+	return 0;
 }
 
 
@@ -770,8 +786,8 @@ int main( int argc, char *argv[] ) {
 	#endif
 
 #if 1
+	optKeydump = opt_set( opts, "--show-full-key" ); 
 #else
-	optKeydump = opt_set( opts, "--show-key-dumps" ); 
 
 	if ( opt_set( opts, "--yaml" ) ) {
 		if ( !(yamlFile = opt_get(opts, "--yaml").s) ) {
@@ -868,7 +884,10 @@ int main( int argc, char *argv[] ) {
 			//Create a new table
 			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
 			lt_lock( pp.ctable );
-			lt_dump( pp.ctable );
+
+			if ( optKeydump ) {
+				lt_kdump( pp.ctable );
+			}
 		}
 
 		//Destroy the source table. 
@@ -893,11 +912,11 @@ int main( int argc, char *argv[] ) {
 
 			//Then loop through matched keys and values
 			while ( (*keys)->k ) {
-#if 0
+			#if 0
 				expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
 				expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
 				keys++;
-#else
+			#else
 				memcpy( &babuf[ baLen ], (*keys)->k, strlen( (*keys)->k ) ); 
 				baLen += strlen( (*keys)->k ); 
 
@@ -912,23 +931,23 @@ int main( int argc, char *argv[] ) {
 				memcpy( &babuf[ baLen ], ", ", 2 );
 				memcpy( &vbuf[ vLen ], ", ", 2 );
 				keys++, baLen+= 2, vLen+= 2; 
-#endif
+			#endif
 			} 
 
 			//Create a SQL creation string, if any hashes were found.
 			if ( mtLen > 1 ) {
-#if 0
+			#if 0
 				babuf[ baLen-2 ]='\0', vbuf[ vLen-2 ]='\0';
 				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
 				free( babuf );
 				free( vbuf );
-#else
+			#else
 				baLen -= 2, vLen -= 2;
 				babuf[ baLen ] = '\0';
 				vbuf[ vLen ] = '\0';
 				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
-#endif
-				fprintf( stderr, "%s\n", fbuf );
+			#endif
+				fprintf( stdout, "%s\n", fbuf );
 			}
 
 			lt_free( tl );

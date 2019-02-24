@@ -272,6 +272,9 @@ int main (int argc, char *argv[] ) {
 #ifndef TAB_H
  #define LT_POLYMORPH_BUFLEN 2048
  #define LT_MAX_HASH 7 
+ #ifndef LT_DEVICE
+  #define LT_DEVICE 2
+ #endif
 #if 0
  #define lt_advance(t, pos) \
 	lt_set( t, t->index + pos, 0 ) 

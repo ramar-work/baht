@@ -2088,8 +2088,7 @@ static void lt_printindex (LiteKv *tt, int showkey, int ind) {
 			}
 		}
 
-		//TODO: This just got ugly.  Combine the different situations better...
-
+	//TODO: This just got ugly.  Combine the different situations better...
 	if ( !i && showkey ) { 
 		if ( t == LITE_TRM )
 			w += snprintf( &b[w], maxlen - w, "%ld", r->vptr );
@@ -2123,12 +2122,14 @@ static void lt_printindex (LiteKv *tt, int showkey, int ind) {
 	}
 	}
 
-	write(2, b, w);
-	write(2, "\n", 1);
+	write( LT_DEVICE, b, w );
+	write( LT_DEVICE, "\n", 1 );
 }	
 
 
 //Dump all values in a table.
+static const char __lt_fmt[] =
+	"[%-5d] (%d) %s";
 static const char __lt_tabs[] = 
 	"\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
 static const char __lt_spaces[] = 
@@ -2136,36 +2137,18 @@ static const char __lt_spaces[] =
 	"                                                  "
 ;
  
-#if 0
-//Dump a table (needs some flags for debugging) 
-int __lt_dump ( LiteKv *kv, int i, void *p ) {
-	//VPRINT( "kv at __lt_dump: %p", kv );
-	LiteType vt = kv->value.type;
-	int *level = (int *)p;
-	fprintf ( stderr, "[%-5d] (%d) %s", i, *level, &__lt_spaces[ 100 - *level ] );
-	//Controls whether or not I print the entire key 
-	//(remember that hashes are chained)
-	//TODO: Give this flag a specific title and document it
-#if 0
-	lt_printindex( kv, 0, *level );
-#else
-	lt_printindex( kv, 1, *level );
-#endif	
-	*level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
-	return 1;
-}
-#endif
-
 
 //Dump a table (needs some flags for debugging) 
 int __lt_dump ( LiteKv *kv, int i, void *p ) {
 	LiteType vt = kv->value.type;
 	LtInner *pp = (LtInner *)p; 
 	if ( pp->indextype ) {
-		fprintf ( stderr, "[%-5d] (%d) %s", i, pp->level, &__lt_spaces[ 100 - pp->level ] );
+		char buf[ 128 ] = { 0 };
+		int l = snprintf( buf, sizeof(buf), __lt_fmt, i, pp->level, &__lt_spaces[100 - pp->level] );
+		write( LT_DEVICE, buf, l );
 	}
 	lt_printindex( kv, pp->dumptype, pp->level );
-	pp->level += ( vt == LITE_NUL ) ? -1 : (vt == LITE_TBL) ? 1 : 0;
+	pp->level += (vt == LITE_NUL) ? -1 : (vt == LITE_TBL) ? 1 : 0;
 	return 1;
 }
 
