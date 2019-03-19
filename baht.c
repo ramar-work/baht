@@ -1074,9 +1074,6 @@ int parse_yaml ( const char *file, Table *t ) {
 #endif
 
 
-
-
-
 //put yaml in string array
 char **load_yaml ( const char *file ) {
 	struct stat sb;
@@ -1088,7 +1085,7 @@ char **load_yaml ( const char *file ) {
 }
 
 
-
+//
 typedef struct completedRequest {
 	const char *url;
 	const char *strippedHttps;
@@ -1098,7 +1095,7 @@ typedef struct completedRequest {
 } cRequest;
 
 
-
+//
 static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *ud) {
 	size_t realsize = size * nmemb;
 	Sbuffer *sb = (Sbuffer *)ud;
@@ -1180,10 +1177,6 @@ int send_request ( const char *p ) {
 		root = rootBuf;
 	}
 
-	//int sec = ( memcmp( "https", p, 5 ) == 0 ); 
-	//int port = sec ? 80 : 443;
-//fprintf(stderr,"%d\n", sec);
-
 	//Pack a message
 	if ( port != 443 )
 		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
@@ -1194,8 +1187,6 @@ int send_request ( const char *p ) {
 		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
 	}
 
-	//write( 2, GetMsg, len ); exit( 0 );
-
 	//Do socket connect (but after initial connect, I need the file desc)
 	if ( RUN( !socket_connect( &s, root, port ) ) ) {
 		return err_set( 0, "%s\n", "Couldn't connect to site... " );
@@ -1203,7 +1194,6 @@ int send_request ( const char *p ) {
 
 	//Do either an insecure request or a secure request
 	if ( !sec ) { ;
-	#if 1
 		//Use libCurl
 		CURL *curl = NULL;
 		CURLcode res;
@@ -1223,46 +1213,6 @@ int send_request ( const char *p ) {
 			write(2,sb.buf,sb.len);
 			curl_global_cleanup();
 		}	
-	#else
-		struct addrinfo hints, *servinfo, *pp;
-		int rv;
-		int sockfd;
-		char s[ INET6_ADDRSTRLEN ];
-		char b[ 10 ] = { 0 };
-		snprintf( b, 10, "%d", port );	
-		memset( &hints, 0, sizeof( hints ) );
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_STREAM;
-		fprintf(stderr,"Attempting connection to '%s':%d\n", root, port);
-		fprintf(stderr,"Full path (%s)\n", p );
-		//fprintf(stderr, "%s\n", p );
-
-		//Get the address info of the domain here.
-		if ( (rv = getaddrinfo( root, b, &hints, &servinfo )) != 0 ) {
-			fprintf( stderr, "getaddrinfo: %s\n", gai_strerror( rv ) );
-			return 0;
-		}
-
-		//Loop and find the right address
-		for ( pp = servinfo; pp != NULL; pp = pp->ai_next ) {
-			if ((sockfd = socket( pp->ai_family, pp->ai_socktype, pp->ai_protocol )) == -1) {	
-				fprintf(stderr,"client: socket error: %s\n",strerror(errno));
-				continue;
-			}
-
-			if (connect(sockfd, pp->ai_addr, pp->ai_addrlen) == -1) {
-				close( sockfd );
-				fprintf(stderr,"client: connect: %s\n",strerror(errno));
-				continue;
-			}
-		}
-
-		//If we completely failed to connect, do something.
-		if ( pp == NULL ) {
-			fprintf(stderr, "client: failed to connect\n");
-			return 1;
-		}
-	#endif
 	}
 	else {
 		//GnuTLS
