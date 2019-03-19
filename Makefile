@@ -9,14 +9,15 @@ DATABASE=ctrial_db
 DBUSER=
 DBPASSWORD=
 SQLBIN=sqlcmd
+LDFLAGS=-lgumbo -llua -lgnutls -lcurl
 
 # go - Build the 'baht' scraper tool
 go: vendor/single.o
-	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
+	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME) && ./$(NAME) -f files/carri.html
 
 # wop - Build the 'baht' scraper tool and run a dump 
 wop: vendor/single.o
-	$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html --show-full-key
+	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME) && ./$(NAME) -f files/carri.html --show-full-key
 
 #$(CC) $(CFLAGS) vendor/single.o baht.c -L. -lgumbo -o $(NAME) && ./$(NAME) -f files/carri.html
 
@@ -27,11 +28,11 @@ explain:
 
 # build - generic, useless build target
 build:
-	$(CC) $(CFLAGS) main.c -L. -lgumbo -o $(NAME) 
+	$(CC) $(CFLAGS) main.c -L. $(LDFLAGS) -o $(NAME) 
 
 # echo - test the useless generic build 
 echo:
-	echo $(CC) $(CFLAGS) main.c -L. -lgumbo -o $(NAME) 
+	echo $(CC) $(CFLAGS) main.c -L. $(LDFLAGS) -o $(NAME) 
 
 main:
 	$(CC) $(CFLAGS) m.c -o mm

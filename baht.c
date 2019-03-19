@@ -54,12 +54,24 @@
 #define LT_DEVICE 1 
 
 #include "vendor/single.h"
+
+#include <curl/curl.h>
+
+#include <gnutls/gnutls.h>
 #include <gumbo.h>
+
+#ifndef DEBUG
+ #define RUN(c) (c)
+#else
+ #define RUN(c) \
+ (c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
+#endif
 
 #if 0
 #else
  #include <lua.h>
  #include <lualib.h>
+ #include <lauxlib.h>
  #include <luaconf.h>
 #endif
 
@@ -100,6 +112,8 @@
 	 ,.checktable = NULL \
 	}
 
+#define ROOT_NODE "page.root"
+
 
 /*Data types*/
 typedef struct { char *k, *v; } yamlList;
@@ -124,6 +138,11 @@ typedef struct useless_structure {
 	Table *checktable;
 } InnerProc;
 
+
+typedef struct stretchBuffer {
+	int len;
+	uint8_t *buf;
+} Sbuffer;
 
 //Approximate where something is, by checking the similarity of its parent
 typedef struct simp { 
@@ -173,6 +192,11 @@ typedef struct nodeblock {
 //An error string buffer (useless)
 char _errbuf[2048] = {0};
 
+//User-Agent
+const char ua[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
+
+//SQL string
+const char fmt[] = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
 
 //Things we'll use
 const char *gumbo_types[] = {
@@ -219,6 +243,7 @@ int err_print ( int status, char *fmt, ... ) {
 	fprintf( stderr, "\n" );
 	return status;
 }
+
 
 //Debugging stuff.
 void print_innerproc( InnerProc *pi ) {
@@ -653,8 +678,64 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	return 1;
 }
 
+struct why { int len; yamlList **list; };
 
-//
+//a dumb hacky way to do this is:
+//3keyvalue 
+//where 3 is the distance from the beginning of the string to find the value
+//obviously key is +1
+//why would I do this?  because it works here...
+int key_from_ht_exec ( LiteKv *kv, int i, void *p ) {
+	struct why *w = (struct why *)p;
+	//yamlList **y = w->list; 
+	LiteType kt = kv->key.type, vt = kv->value.type;
+#if 0
+fprintf( stderr, "%d %p\n", w->len, y );
+fprintf( stderr, "%s,%s\n", lt_typename( kt ), lt_typename( vt ) );
+#endif
+	if ( kt == LITE_TXT && vt == LITE_TXT ) {
+		yamlList *tmp = malloc(sizeof(yamlList));
+		memset( tmp, 0, sizeof(yamlList));
+		tmp->k = kv->key.v.vchar; //add key
+		tmp->v = kv->value.v.vchar; //add value 
+		ADD_ELEMENT( w->list, w->len, sizeof( yamlList * ), tmp ); 
+#if 0
+for ( int x = 0; x<w->len; x++ ) {
+	fprintf( stderr, "%s\n", w->
+}
+#endif
+	}
+
+	if ( kt == LITE_TRM ) {
+		return 0;
+	}
+
+	return 1;
+}
+
+
+//Assuming I use a hash table, I want to create a simple array of keys and values
+yamlList **keys_from_ht ( Table *t ) {
+	struct why w = { 0, NULL };
+	int h=0; 
+	//Find the elements key first
+	if (( h = lt_geti( t, "elements" )) == -1 ) {
+		return NULL;	
+	}
+
+	//Loop from this key if found.
+	lt_exec_complex( t, h, t->count, &w, key_from_ht_exec );
+
+	for ( int i=0; i<w.len; i++ ) {
+		yamlList *y = w.list[ i ];
+		fprintf( stderr, "%s = %s\n", y->k, y->v );
+	}
+
+	ADD_ELEMENT( w.list, w.len, sizeof( yamlList * ), NULL );
+	return w.list;
+}
+
+#if 0
 yamlList ** find_keys_in_mt ( Table *t, yamlList *tn, int *len ) {
 	yamlList **sql = NULL;
 	int h=0, sqlLen = 0;
@@ -680,6 +761,645 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList *tn, int *len ) {
 	*len = sqlLen;
 	return sql;
 }
+#endif
+
+//
+yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
+//lt_kdump( t );
+	yamlList **sql = NULL;
+	int h=0, sqlLen = 0;
+	while ( (*tn) ) {
+		if ( !(*tn)->v )
+			;//fprintf( stderr, "No target value for column %s\n", tn->k );	
+		else {
+			//fprintf( stderr, "hash of %s: %d\n", (*tn)->v, lt_geti( t, (*tn)->v ) );
+			if ( (h = lt_geti( t, (*tn)->v )) == -1 )
+				0;
+			else {
+				yamlList *kv = malloc( sizeof(yamlList) );
+				kv->k = (*tn)->k;
+				kv->v =	lt_text_at( t, h );  
+				ADD_ELEMENT( sql, sqlLen, yamlList *, kv ); 
+			}
+		}
+		tn++;
+	}
+	yamlList *term = malloc( sizeof(yamlList) );
+	term->k = NULL;
+	ADD_ELEMENT( sql, sqlLen, yamlList *, term );
+	*len = sqlLen;
+	return sql;
+}
+
+
+//
+int expandbuf ( char **buf, char *src, int *pos ) {
+	//allocate additional space
+	realloc( *buf, strlen( src ) );
+	memset( &buf[ *pos ], 0, strlen( src ) );
+	memcpy( &buf[ *pos ], src, strlen( src ) );
+	*pos += strlen( src );	
+	return 1;
+}
+
+
+//
+int loadyamlfile ( const char *file ) {
+	//load a yaml file
+	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
+	//or you can keep them in some kind of list
+	//that's weird, but it does work
+	return 0;
+}
+
+
+//Gumbo to Table 
+int lua_to_table (lua_State *L, int index, Table *t ) {
+	static int sd;
+	lua_pushnil( L );
+
+	while ( lua_next( L, index ) != 0 ) {
+		int kt, vt;
+#if 0
+		//This should pop both keys...
+		obprintf( stderr, "%s, %s\n", lua_typename( L, lua_type(L, -2 )), lua_typename( L, lua_type(L, -1 )));
+
+		//Keys
+		if (( kt = lua_type( L, -2 )) == LUA_TNUMBER )
+			obprintf( stderr, "key: %lld\n", (long long)lua_tointeger( L, -2 ));
+		else if ( kt  == LUA_TSTRING )
+			obprintf( stderr, "key: %s\n", lua_tostring( L, -2 ));
+
+		//Values
+		if (( vt = lua_type( L, -1 )) == LUA_TNUMBER )
+			obprintf( stderr, "val: %lld\n", (long long)lua_tointeger( L, -1 ));
+		else if ( vt  == LUA_TSTRING )
+			obprintf( stderr, "val: %s\n", lua_tostring( L, -1 ));
+#endif
+
+		//Get key (remember Lua indices always start at 1.  Hence the minus.
+		if (( kt = lua_type( L, -2 )) == LUA_TNUMBER )
+			lt_addintkey( t, lua_tointeger( L, -2 ) - 1);
+		else if ( kt  == LUA_TSTRING )
+			lt_addtextkey( t, (char *)lua_tostring( L, -2 ));
+
+		//Get value
+		if (( vt = lua_type( L, -1 )) == LUA_TNUMBER )
+			lt_addintvalue( t, lua_tointeger( L, -1 ));
+		else if ( vt  == LUA_TSTRING )
+			lt_addtextvalue( t, (char *)lua_tostring( L, -1 ));
+		else if ( vt == LUA_TTABLE ) {
+			lt_descend( t );
+			//obprintf( stderr, "Descending because value at %d is table...\n", -1 );
+			//lua_loop( L );
+			lua_to_table( L, index + 2, t ); 
+			lt_ascend( t );
+			sd--;
+		}
+
+		//obprintf( stderr, "popping last two values...\n" );
+		if ( vt == LUA_TNUMBER || vt == LUA_TSTRING ) {
+			lt_finalize( t );
+		}
+		lua_pop(L, 1);
+	}
+
+	lt_lock( t );
+	return 1;
+}
+
+
+//
+int lua_load_file( lua_State *L, const char *file, char **err ) {
+	if ( luaL_dofile( L, file ) != 0 ) {
+		fprintf( stderr, "Error occurred!\n" );
+		//The entire stack needs to be cleared...
+		if ( lua_gettop( L ) > 0 ) {
+			fprintf( stderr, "%s\n", lua_tostring(L, 1) );
+			return ( snprintf( *err, 1023, "%s\n", lua_tostring( L, 1 ) ) ? 0 : 0 );
+		}
+	}
+	return 1;	
+}
+
+
+//
+void lua_dumptable ( lua_State *L, int *pos, int *sd ) {
+	lua_pushnil( L );
+	//fprintf( stderr, "*pos = %d\n", *pos );
+
+	while ( lua_next( L, *pos ) != 0 ) {
+		//Fancy printing
+		//fprintf( stderr, "%s", &"\t\t\t\t\t\t\t\t\t\t"[ 10 - *sd ] );
+		//PRETTY_TABS( *sd );
+		fprintf( stderr, "[%3d:%2d] => ", *pos, *sd );
+
+		//Print both left and right side
+		for ( int i = -2; i < 0; i++ ) {
+			int t = lua_type( L, i );
+			const char *type = lua_typename( L, t );
+			if ( t == LUA_TSTRING )
+				fprintf( stderr, "(%8s) %s", type, lua_tostring( L, i ));
+			else if ( t == LUA_TFUNCTION )
+				fprintf( stderr, "(%8s) %p", type, (void *)lua_tocfunction( L, i ) );
+			else if ( t == LUA_TNUMBER )
+				fprintf( stderr, "(%8s) %lld", type, (long long)lua_tointeger( L, i ));
+			else if ( t == LUA_TBOOLEAN)
+				fprintf( stderr, "(%8s) %s", type, lua_toboolean( L, i ) ? "true" : "false" );
+			else if ( t == LUA_TTHREAD )
+				fprintf( stderr, "(%8s) %p", type, lua_tothread( L, i ) );
+			else if ( t == LUA_TLIGHTUSERDATA || t == LUA_TUSERDATA )
+				fprintf( stderr, "(%8s) %p", type, lua_touserdata( L, i ) );
+			else if ( t == LUA_TNIL ||  t == LUA_TNONE )
+				fprintf( stderr, "(%8s) %p", type, lua_topointer( L, i ) );
+			else if ( t == LUA_TTABLE ) {
+				fprintf( stderr, "(%8s) %p\n", type, lua_topointer( L, i ) );
+				(*sd) ++, (*pos) += 2;
+				lua_dumptable( L, pos, sd );
+				(*sd) --, (*pos) -= 2;
+				//PRETTY_TABS( *sd );
+				fprintf( stderr, "}" );
+			}
+			fprintf( stderr, "%s", ( i == -2 ) ? " -> " : "\n" );
+		}
+
+		lua_pop( L, 1 );
+	}
+	return;
+}
+
+
+
+
+void lua_stackdump ( lua_State *L ) {
+	//No top
+	if ( lua_gettop( L ) == 0 )
+		return;
+
+	//Loop again, but show the value of each key on the stack
+	for ( int pos = 1; pos <= lua_gettop( L ); pos++ ) {
+		int t = lua_type( L, pos );
+		const char *type = lua_typename( L, t );
+		fprintf( stderr, "[%3d] => ", pos );
+
+		if ( t == LUA_TSTRING )
+			fprintf( stderr, "(%8s) %s", type, lua_tostring( L, pos ));
+		else if ( t == LUA_TFUNCTION )
+			fprintf( stderr, "(%8s) %p", type, (void *)lua_tocfunction( L, pos ) );
+		else if ( t == LUA_TNUMBER )
+			fprintf( stderr, "(%8s) %lld", type, (long long)lua_tointeger( L, pos ));
+		else if ( t == LUA_TBOOLEAN)
+			fprintf( stderr, "(%8s) %s", type, lua_toboolean( L, pos ) ? "true" : "false" );
+		else if ( t == LUA_TTHREAD )
+			fprintf( stderr, "(%8s) %p", type, lua_tothread( L, pos ) );
+		else if ( t == LUA_TLIGHTUSERDATA || t == LUA_TUSERDATA )
+			fprintf( stderr, "(%8s) %p", type, lua_touserdata( L, pos ) );
+		else if ( t == LUA_TNIL ||  t == LUA_TNONE )
+			fprintf( stderr, "(%8s) %p", type, lua_topointer( L, pos ) );
+		else if ( t == LUA_TTABLE ) {
+		#if 0
+			fprintf( stderr, "(%8s) %p", type, lua_topointer( L, pos ) );
+		#else
+			fprintf( stderr, "(%8s) %p {\n", type, lua_topointer( L, pos ) );
+			int sd = 1;
+			lua_dumptable( L, &pos, &sd );
+			fprintf( stderr, "}" );
+		#endif
+		}	
+		fprintf( stderr, "\n" );
+	}
+	return;
+}
+
+
+//parse_lua
+int parse_lua ( Table *t, const char *file ) {
+	lua_State *L = luaL_newstate(); 
+	if ( !L ) {
+		return 0;
+	}
+	//
+	luaL_openlibs( L );
+	if ( luaL_dofile( L, file ) != 0 ) {
+		if ( lua_gettop( L ) > 0 ) {
+			fprintf( stderr, "error happened with Lua: %s\n", lua_tostring( L, 1 ) );
+		}
+	}
+	//
+	lua_to_table( L, 1, t );
+	lt_dump( t );
+	return 1;
+}
+
+
+//...
+char *scopy ( char *b, int bl ) {
+	char *a = malloc( bl + 1 );
+	memset( a, 0, bl + 1 );
+	memcpy( a, b, bl );
+	return a;
+}
+
+
+#if 0
+//TODO: This is a dependency-less way of handling Table maps, but it still doesn't solve the function execution problem.
+(Using Lua does, but adds some weight to the library)
+//put yaml in a Table
+int parse_yaml ( const char *file, Table *t ) {
+	//load a yaml file
+	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
+	//or you can keep them in some kind of list
+	//that's weird, but it does work
+	struct stat sb;
+	int fd;
+	char buf[ 2048 ] = {0};
+	if (	stat( file, &sb ) == -1 ) 
+		return 0;
+
+	if ( (fd = open( file, O_RDONLY )) == -1 )
+		return 0;
+
+	if ( read( fd, buf, sb.st_size ) == -1 )
+		return 0;
+
+	//read the buf
+	int boggs = 0;
+	char *k = NULL;
+	int kl = 0;
+	meminit( m, 0, 0 );	
+	while ( strwalk( &m, buf, ": \n" ) ) {
+
+		//start at first key
+		if ( m.chr != ':' && !boggs ) 
+			continue;
+		else {
+			if ( m.chr == ':' ) boggs = 1; 
+		}	
+
+		//this is a key
+		if ( m.chr == ':' ) {
+		#if 1
+			scopy( &buf[ m.pos ], m.size );
+		#else
+			k = &buf[ m.pos ];
+			kl = m.size;
+
+			//Copy string
+			char *a = malloc( m.size + 1 );
+			memset( a, 0, m.size + 1 );
+			memcpy( a, k, kl );	
+		#endif
+		}
+
+
+		if ( m.chr == '\n' && buf[ m.next ] == '\n' ) {
+			fprintf(stderr, "next\n" );
+		}
+
+		if ( m.chr == '\n' && buf[ m.next ] == ' ' ) {
+			//save the key as a prefix?
+			fprintf(stderr, "pref\n" );
+		}
+
+		fprintf( stderr, "mem[ p: %d, n: %d, s: %d, it: %d, chr: '%c'\n", 
+			m.pos, m.next, m.size, m.it, m.chr );
+
+		write( 2, &buf[ m.pos ], m.size ); 
+		getchar();	
+		
+	}  
+
+	return 1;
+}
+#endif
+
+
+
+
+
+//put yaml in string array
+char **load_yaml ( const char *file ) {
+	struct stat sb;
+	int stt = stat( "example.yaml", &sb );
+	int fd = open( "example.yaml", O_RDONLY );
+	char buf[ 2048 ] = {0};
+	read( fd, buf, sb.st_size );
+	return NULL;
+}
+
+
+
+typedef struct completedRequest {
+	const char *url;
+	const char *strippedHttps;
+	const char *statusLine;
+	const char *path;
+	int status;
+} cRequest;
+
+
+
+static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *ud) {
+	size_t realsize = size * nmemb;
+	Sbuffer *sb = (Sbuffer *)ud;
+	uint8_t *ptr = realloc( sb->buf, sb->len + realsize + 1 ); 
+	if ( !ptr ) {
+		fprintf( stderr, "No additional memory to complete request.\n" );
+		return 0;
+	}
+	sb->buf = ptr;
+	memcpy( &sb->buf[ sb->len ], p, realsize );
+	sb->len += realsize;
+	sb->buf[ sb->len ] = 0;
+	return realsize;
+}
+
+//Send requests to web pages.
+int send_request ( const char *p ) {
+	//Define all of this useful stuff
+	int err, ret, sd, ii, type, len;
+	unsigned int status;
+	Socket s = { .server   = 0, .proto    = "tcp" };
+	gnutls_session_t session;
+	memset( &session, 0, sizeof(gnutls_session_t));
+	gnutls_datum_t out;
+	gnutls_certificate_credentials_t xcred;
+	memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
+	char buf[ 4096 ] = { 0 }, *desc = NULL;
+	uint8_t msg[ 32000 ] = { 0 };
+	char GetMsg[2048] = { 0 };
+	char rootBuf[ 128 ] = { 0 };
+	const char *root = NULL; 
+	const char *site; 
+	const char *urlpath;
+	const char *path = NULL;
+	int c=0;
+
+	//A HEAD can be done first to check for any changes, maybe
+	//Then do a GET
+	const char GetMsgFmt[] = 
+		"GET %s HTTP/1.1\r\n"
+		"Host: %s\r\n"
+		"User-Agent: %s\r\n\r\n"
+	;
+
+	int sec, port;
+	const char *fp = NULL;
+
+	//You also need to chop 'http' and 'https' off of the thing
+	//if != 0, it's not secure
+	if ( memcmp( "https", p, 5 ) == 0 ) {
+		sec = 1;
+		port = 443;
+		p = &p[8];
+		fp = &p[8];
+	}
+	else if ( memcmp( "http", p, 4 ) == 0 ) {
+		sec = 0;
+		port = 80;
+		p = &p[7];
+		fp = &p[7];
+	}
+	else {
+		sec = 0;
+		port = 80;
+		fp = p;
+	}
+
+//fprintf(stderr, "%s\n", p ); exit( 0 );
+
+	//Chop the URL very simply and crudely.
+	if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
+		path = "/";
+		root = p;
+	}
+	else {	
+		memcpy( rootBuf, p, c );
+		path = &p[ c ];
+		root = rootBuf;
+	}
+
+	//int sec = ( memcmp( "https", p, 5 ) == 0 ); 
+	//int port = sec ? 80 : 443;
+//fprintf(stderr,"%d\n", sec);
+
+	//Pack a message
+	if ( port != 443 )
+		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
+	else {
+		char hbbuf[ 128 ] = { 0 };
+		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
+		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
+		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
+	}
+
+	//write( 2, GetMsg, len ); exit( 0 );
+
+	//Do socket connect (but after initial connect, I need the file desc)
+	if ( RUN( !socket_connect( &s, root, port ) ) ) {
+		return err_set( 0, "%s\n", "Couldn't connect to site... " );
+	}
+
+	//Do either an insecure request or a secure request
+	if ( !sec ) { ;
+	#if 1
+	#if 0
+		//send across socket
+		int a;
+		if ( !(a = socket_tcp_send ( &s, (uint8_t *)GetMsg, len )) ) {
+			return err_set( 0, "%s\n", "Couldn't send TCP packet... " );
+		}
+	fprintf( stderr, "%d\n", a );
+		//recv socket	
+		if ( !socket_tcp_recv ( &s, msg, (int *)&len ) ) {
+			return err_set( 0, "%s\n", "Couldn't send TCP packet... " );
+		}
+	#else
+	//LibCurl
+		CURL *curl;
+		CURLcode res;
+		curl_global_init( CURL_GLOBAL_DEFAULT );
+		curl = curl_easy_init();
+		if ( curl ) {
+			Sbuffer sb = { 0, malloc(1) }; 	
+			curl_easy_setopt( curl, CURLOPT_URL, p );
+			curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, WriteDataCallbackCurl );
+			curl_easy_setopt( curl, CURLOPT_WRITEDATA, (void *)&sb );
+			curl_easy_setopt( curl, CURLOPT_USERAGENT, ua );
+			res = curl_easy_perform( curl );
+			if ( res != CURLE_OK ) {
+				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+				curl_easy_cleanup( curl );
+			}
+			write(2,sb.buf,sb.len);
+			curl_global_cleanup();
+		}	
+	#endif
+	#else
+		struct addrinfo hints, *servinfo, *pp;
+		int rv;
+		int sockfd;
+		char s[ INET6_ADDRSTRLEN ];
+		char b[ 10 ] = { 0 };
+		snprintf( b, 10, "%d", port );	
+		memset( &hints, 0, sizeof( hints ) );
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
+		fprintf(stderr,"Attempting connection to '%s':%d\n", root, port);
+		fprintf(stderr,"Full path (%s)\n", p );
+		//fprintf(stderr, "%s\n", p );
+
+		//Get the address info of the domain here.
+		if ( (rv = getaddrinfo( root, b, &hints, &servinfo )) != 0 ) {
+			fprintf( stderr, "getaddrinfo: %s\n", gai_strerror( rv ) );
+			return 0;
+		}
+
+		//Loop and find the right address
+		for ( pp = servinfo; pp != NULL; pp = pp->ai_next ) {
+			if ((sockfd = socket( pp->ai_family, pp->ai_socktype, pp->ai_protocol )) == -1) {	
+				fprintf(stderr,"client: socket error: %s\n",strerror(errno));
+				continue;
+			}
+
+			if (connect(sockfd, pp->ai_addr, pp->ai_addrlen) == -1) {
+				close( sockfd );
+				fprintf(stderr,"client: connect: %s\n",strerror(errno));
+				continue;
+			}
+		}
+
+		//If we completely failed to connect, do something.
+		if ( pp == NULL ) {
+			fprintf(stderr, "client: failed to connect\n");
+			return 1;
+		}
+	#endif
+	}
+	else {
+		//GnuTLS
+		if ( RUN( !gnutls_check_version("3.4.6") ) ) { 
+			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
+		}
+
+		//Is this needed?
+		if ( RUN( ( err = gnutls_global_init() ) < 0 ) ) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+
+		if ( RUN( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 )) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+
+		if ( RUN( ( err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 )) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+		/*
+		//Set client certs this way...
+		gnutls_certificate_set_x509_key_file( xcred, "cert.pem", "key.pem" );
+		*/	
+
+		//Initialize gnutls and set things up
+		if ( RUN( ( err = gnutls_init( &session, GNUTLS_CLIENT ) ) < 0 )) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+
+		if ( RUN( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, root, strlen(root)) ) < 0)) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+
+		if ( RUN( ( err = gnutls_set_default_priority( session ) ) < 0) ) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+		
+		if ( RUN( ( err = gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, xcred )) <0) ) {
+			return err_set( 0, "%s\n", gnutls_strerror( err ));
+		}
+
+		gnutls_session_set_verify_cert( session, root, 0 );
+		//fprintf( stderr, "s.fd: %d\n", s.fd );
+		gnutls_transport_set_int( session, s.fd );
+		gnutls_handshake_set_timeout( session, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT );
+
+		//This is ass ugly...
+		do {
+			RUN( ret = gnutls_handshake( session ) );
+		} while ( ret < 0 && gnutls_error_is_fatal( ret ) == 0 );
+
+		if ( RUN( ret < 0 ) ) {
+			fprintf( stderr, "ret: %d\n", ret );
+			if ( ret == GNUTLS_E_CERTIFICATE_VERIFICATION_ERROR ) {	
+				type = gnutls_certificate_type_get( session );
+				status = gnutls_session_get_verify_cert_status( session );
+				err = gnutls_certificate_verification_status_print( status, type, &out, 0 );
+				fprintf( stdout, "cert verify output: %s\n", out.data );
+				gnutls_free( out.data );
+				//jump to end, but I don't do go to
+			}
+			return err_set( 0, "%s\n", "Handshake failed: %s\n", gnutls_strerror( ret ));
+		}
+		else {
+			desc = gnutls_session_get_desc( session );
+			fprintf( stdout, "- Session info: %s\n", desc );
+			gnutls_free( desc );
+		}
+
+		if (RUN( ( err = gnutls_record_send( session, GetMsg, len ) ) < 0 ))
+			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
+
+		//This is a sloppy quick way to handle EAGAIN
+		int statter=0;
+		while ( statter < 5 ) {
+			if ( RUN( (ret = gnutls_record_recv( session, msg, sizeof(msg))) == 0 ) ) {
+				fprintf( stderr, " - Peer has closed the TLS Connection\n" );
+				//goto end;
+				statter = 5;
+			}
+			else if ( RUN( ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) ) {
+				fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
+				//goto end;
+				//statter = 5;
+			}
+			else if ( RUN( ret < 0 ) ) {
+				fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
+				//goto end;
+			}
+			else if ( RUN( ret > 0 ) ) {
+				//it looks like we MAY have received a packet here.
+				statter = 5;
+				break;
+			}
+
+			fprintf( stderr, "%d: %d\n", statter, ret );
+			statter++;
+		}
+
+		if ( ret > 0 ) {
+			fprintf( stdout, "Recvd %d bytes:\n", ret );
+			fflush( stdout );
+			write( 1, msg, ret );
+			fflush( stdout );
+			fputs( "\n", stdout );
+			len = ret;
+		}
+
+		if (RUN((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 )) {
+			return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
+		}
+	}
+
+	//Hey, here's our message
+	fprintf(stderr, "MESSAGE:\n" );
+	fprintf(stderr,"%d\n", len);
+	write( 1, msg, len );
+
+end:
+	socket_close( &s );
+	gnutls_deinit( session );
+	gnutls_certificate_free_credentials( xcred );
+	gnutls_global_deinit();	
+	return 1;
+}
 
 
 //Option
@@ -688,7 +1408,15 @@ Option opts[] = {
  ,{ "-u", "--url",           "Get something from the WWW", 's' }
  ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
  ,{ "-k", "--show-full-key", "Show a full key"  }
- ,{ "-s", "--sql",           "Dump SQL"  }
+ ,{ "-q", "--sql",           "Dump SQL"  }
+
+	/*Dump options*/
+ ,{ "-s", "--node-start",    "Use the tags from this YAML file", 'n' }
+ ,{ "-e", "--node-end",      "Use the tags from this YAML file", 'n' }
+ ,{ "-o", "--output",        "Send output to this file", 's' }
+
+	/*...*/
+ ,{ "-p", "--parse",         "Parse file", 's' }
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -715,25 +1443,6 @@ struct Cmd {
 #endif
 
 
-int expandbuf ( char **buf, char *src, int *pos ) {
-	//allocate additional space
-	realloc( *buf, strlen( src ) );
-	memset( &buf[ *pos ], 0, strlen( src ) );
-	memcpy( &buf[ *pos ], src, strlen( src ) );
-	*pos += strlen( src );	
-	return 1;
-}
-
-
-int loadyamlfile ( const char *file ) {
-	//load a yaml file
-	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
-	//or you can keep them in some kind of list
-	//that's weird, but it does work
-	return 0;
-}
-
-
 //Much like moving through any other parser...
 int main( int argc, char *argv[] ) {
 
@@ -741,13 +1450,52 @@ int main( int argc, char *argv[] ) {
 	(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);
 
 	//Define references
-	Table tex, src;
-	Table *tt = &src;
 	char *b = NULL, *sc = NULL, *yamlFile=NULL; 
 	char *ps[] = { NULL, NULL };
 	char **p = ps;
 	int len=0;
+#if 0
+http://jeffsautosales.com/inventory.asp
+https://www.heritagerides.com/inventory.aspx
+http://www.mmautonc.com/inventory/lumberton-used-cars?p1=5&p2=10000
+https://lamotorsnc.com//newandusedcars.aspx?clearall=1
+http://shopthecarport.com/inventory
+https://www.importmotorsportsnc.com/cars-for-sale
+https://www.nolimitmotorsports.com/inventory.aspx?cursort=asc&pagesize=500
+https://plottcars.com/inventory
+http://www.autoshowcasesc.com/inventory/Indian-Land-Used-Cars
+https://paylesscardealsofhickory.com/inventory
+https://www.callawaymotorco.com/inventory/
+https://www.wesleyautomotive.com/inventory/?pager=20&page_no=1
+https://www.autoslimited.com/cars-for-sale
+http://www.goosecreekautomotive.com/inventory/mercedes-benz-for-sale-charlotte
+https://www.classicautonc.com/inventory.aspx
+#endif
 
+const char *listurls[] = {
+  "http://jeffsautosales.com/inventory.asp"
+#if 0	
+, "https://lamotorsnc.com//newandusedcars.aspx?clearall=1"
+, "http://www.ramarcollins.com"
+,"www.heritagerides.com/inventory.aspx"
+,"www.mmautonc.com/inventory/lumberton-used-cars?p1=5&p2=10000"
+,"lamotorsnc.com/newandusedcars.aspx?clearall=1"
+,"shopthecarport.com/inventory"
+,"www.importmotorsportsnc.com/cars-for-sale"
+,"www.nolimitmotorsports.com/inventory.aspx?cursort=asc&pagesize=500"
+,"plottcars.com/inventory"
+,"www.autoshowcasesc.com/inventory/Indian-Land-Used-Cars"
+,"paylesscardealsofhickory.com/inventory"
+,"www.callawaymotorco.com/inventory/"
+,"www.wesleyautomotive.com/inventory/?pager=20&page_no=1"
+,"www.autoslimited.com/cars-for-sale"
+,"www.goosecreekautomotive.com/inventory/mercedes-benz-for-sale-charlotte"
+,"www.classicautonc.com/inventory.aspx"
+#endif
+};
+
+	send_request( *listurls );
+exit( 0 );
 	//Get source somewhere.
 	#if 0
 	if ( 1 ) {
@@ -788,6 +1536,22 @@ int main( int argc, char *argv[] ) {
 #if 1
 	optKeydump = opt_set( opts, "--show-full-key" ); 
 #else
+	//Let's stop real quick and figure out a consistent data structure for use with this.
+	//Supposing I have multiple of this thing, I want something that looks like:
+	DType {
+		const char *src;      //the content that will be parsed by gumbo
+		const char *yaml;     //yaml(or whatever) to help me frame that
+		RecordSet records[];  //???, I think this was incase I read from db... not sure how important it is...
+		int srctype; ( enum WWW, FILE, INPUT, ... )
+		
+		//could go ahead and include all needed tables as well...
+		//same with root and jump
+		//same with all of those damned buffers...
+		//could even do the same with sql, provided everything were going to the same place.
+		//we'd have a MASSIVE set of sql...
+		//however, would it be easier to combine these at the shell level?
+		//I could run them in parallel, but I'd still have issues...
+	}
 
 	if ( opt_set( opts, "--yaml" ) ) {
 		if ( !(yamlFile = opt_get(opts, "--yaml").s) ) {
@@ -828,43 +1592,75 @@ int main( int argc, char *argv[] ) {
 
 	//Loop through things
 	while ( *p ) {	
-		//*p can point to either a block of bytes, or be a file name or url
-		//TODO: add a way to differentiate the types here
-		//TODO: Define all of those vars up here...
-
-		//Create a hash table out of the expected keys.
-		if ( !yamlList_to_table( expected_keys, &tex ) )
-			return err_print( 0, "%s", "Failed to create hash list." );
-
-		//Create an HTML hash table
-		if ( !parse_html( tt, *p, strlen( *p )) )
-			return err_print( 0, "Couldn't parse HTML to hash Table:\n%s", *p );
-
-		//Set some references
-		uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
+		//Define all of that mess up here
 		int rootNode, jumpNode, activeNode;
-		NodeSet *root = &nodes[ 0 ].rootNode, *jump = &nodes[ 0 ].jumpNode; 
+		uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
+		char *fkey=NULL, *rkey=NULL;
+		NodeSet *root=NULL, *jump=NULL;
 
-		//Find the root node.
-		if ( ( rootNode = lt_geti( tt, root->string ) ) == -1 )
-			return err_print( 0, "string '%s' not found.\n", root->string );
+		//Initialize the table of final values here
+		Table *tHtml = malloc(sizeof(Table)); 
+		lt_init( tHtml, NULL, 33333 );  
 
-		//Find the "jump" node.
-		if ( !jump->string ) 
-			jumpNode = rootNode;
-		else {
-			if ( ( jumpNode = lt_geti( tt, jump->string ) ) == -1 ) {
-				return err_print( 0, "jump string '%s' not found.\n", jump->string );
-			}
+		//Initialize the file keys and parse a file here
+		Table *tYaml = malloc(sizeof(Table));
+		lt_init( tYaml, NULL, 127 );  
+		parse_lua( tYaml, "example.lua" );	
+		yamlList **ky = keys_from_ht( tYaml );
+
+#if 0
+		//Dump all found keys
+		while ( (*keys) ) {
+			printf( "%s\n", (*keys)->k );
+			keys++;
+		}
+#endif
+
+#if 0
+		//Set the page URL and go retrieve it 
+		//pageUrl = lt_text( tYaml, "page.url" );
+		//get_page( pageUrl );
+#endif
+		//There is a "repeat" key as well, which will just do more requests if necessary to different pages.
+		//...
+
+		//Set the root node and jump node
+		char *rootString = lt_text( tYaml, "root.origin" );
+		char *jumpString = lt_text( tYaml, "root.start" );
+		//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
+
+		//Create a hash table of all the HTML
+		if ( !parse_html( tHtml, *p, strlen( *p )) ) {
+			return err_print( 0, "Couldn't parse HTML to hash Table:\n%s", *p );
 		}
 
+		//Set some references
+		root = &nodes[ 0 ].rootNode;
+		jump = &nodes[ 0 ].jumpNode;
+
+		//Find the root node.
+		if ( ( rootNode = lt_geti( tHtml, rootString ) ) == -1 ) {
+			return err_print( 0, "string '%s' not found.\n", rootString );
+		}
+
+		//Find the "jump" node.
+		if ( !jumpString ) 
+			jumpNode = rootNode;
+		else {
+			if ( ( jumpNode = lt_geti( tHtml, jumpString ) ) == -1 ) {
+				return err_print( 0, "jump string '%s' not found.\n", jumpString );
+			}
+		}
+		//printf( "%d, %d\n", rootNode, jumpNode ); exit( 0 );
+
 		//Get parent and do work.
-		char *fkey = (char *)lt_get_full_key( tt, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
-		char *rkey = (char *)lt_get_full_key( tt, rootNode, rkbuf, sizeof(rkbuf) - 1 );
-		SET_INNER_PROC(pp, tt, rootNode, jumpNode, fkey, rkey );
+		fkey = (char *)lt_get_full_key( tHtml, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
+		rkey = (char *)lt_get_full_key( tHtml, rootNode, rkbuf, sizeof(rkbuf) - 1 );
+		SET_INNER_PROC( pp, tHtml, rootNode, jumpNode, fkey, rkey );
+//print_innerproc( &pp );printf( "%s, %s\n", fkey, rkey );
 
 		//Start the extraction process 
-		lt_exec( tt, &pp, create_frame );
+		lt_exec( tHtml, &pp, create_frame );
 
 		//Build individual tables for each.
 		for ( int i=0; i<pp.hlistLen; i++ ) {
@@ -873,7 +1669,7 @@ int main( int argc, char *argv[] ) {
 			int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
 
 			//Create a table to track occurrences of hashes
-			build_ctck( tt, start, end - 1 ); 
+			build_ctck( tHtml, start, end - 1 ); 
 
 			//TODO: Simplify this
 			Table *th = malloc( sizeof(Table) );
@@ -882,7 +1678,7 @@ int main( int argc, char *argv[] ) {
 			pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
 
 			//Create a new table
-			lt_exec_complex( tt, start, end - 1, &pp, build_individual );
+			lt_exec_complex( tHtml, start, end - 1, &pp, build_individual );
 			lt_lock( pp.ctable );
 
 			if ( optKeydump ) {
@@ -891,14 +1687,14 @@ int main( int argc, char *argv[] ) {
 		}
 
 		//Destroy the source table. 
-		lt_free( tt );
+		lt_free( tHtml );
 
 		//Now check that each table has something
 		for ( int i=0; i<pp.tlistLen; i++ ) {
 			Table *tl = pp.tlist[ i ];
 
 			//TODO: Simplify this, by a large magnitude...
-			yamlList *tn = testNodes;
+			//yamlList *tn = testNodes;
 			int baLen = 0, vLen = 0, mtLen = 0;
 		#if 0
 			char *babuf=NULL, *vbuf=NULL, *fbuf=NULL;
@@ -907,8 +1703,16 @@ int main( int argc, char *argv[] ) {
 			char vbuf[ 100000 ] = {0};
 			char fbuf[ 120000 ] = {0};
 		#endif
-			const char fmt[] = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-			yamlList **keys = find_keys_in_mt( tl, tn, &mtLen );
+
+			//I need to loop through the "block" and find each hash
+			yamlList **keys = find_keys_in_mt( tl, ky, &mtLen );
+		#if 0
+			while ( (*keys)->k ) {
+				fprintf( stderr, "%s - %s\n", (*keys)->k, (*keys)->v );
+				keys++;
+			}
+		#else
+		#endif
 
 			//Then loop through matched keys and values
 			while ( (*keys)->k ) {

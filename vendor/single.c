@@ -3766,10 +3766,8 @@ _Bool socket_listen (Socket *sock) {
 
 
 //Opens a non blocking socket.
-_Bool socket_tcp_recv (Socket *sock, uint8_t *msg, int *len) 
-{
-	int t = 0, 
-      r = 0, 
+_Bool socket_tcp_recv (Socket *sock, uint8_t *msg, int *len) {
+	int t = 0, r = 0, 
       w = ( *len > 0 ) ? *len : 64;
 
 	//If it's -1, die.  If it's less than buffer, die
@@ -3812,11 +3810,12 @@ _Bool socket_tcp_recv (Socket *sock, uint8_t *msg, int *len)
 
 		//If byte length is zero, I'm probably finished reading
 		if ( !r ) {
-			//fprintf( stderr, "socket_tcp_recv should be done...\n" );
+			fprintf( stderr, "socket_tcp_recv should be done...\n" );
 			break;
 		}
 
 		VPRINT( "%d bytes received\n", r );
+		fprintf( stderr, "%d bytes received\n", r );
 		t += r;
 	}
 
@@ -4043,8 +4042,7 @@ int socket_connect (Socket *self, const char *uri, int port)
 
 
 //Send data via TCP Socket
-_Bool socket_tcp_send (Socket *sock, uint8_t *msg, uint32_t length) 
-{
+_Bool socket_tcp_send (Socket *sock, uint8_t *msg, uint32_t length) {
 	int bs  = 0;
 	int t   = 0;
 	int len = length;
@@ -4102,6 +4100,7 @@ _Bool socket_tcp_send (Socket *sock, uint8_t *msg, uint32_t length)
 
 		//This should keep running
 		VPRINT( "%d bytes written\n", bs );
+		fprintf( stderr, "%d bytes written\n", bs );
 		t   += bs;
 		len -= t ;	
 	}
