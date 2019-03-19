@@ -54,9 +54,6 @@
 #define LT_DEVICE 1 
 
 #include "vendor/single.h"
-
-#include <curl/curl.h>
-
 #include <gnutls/gnutls.h>
 #include <gumbo.h>
 
@@ -138,11 +135,6 @@ typedef struct useless_structure {
 	Table *checktable;
 } InnerProc;
 
-
-typedef struct stretchBuffer {
-	int len;
-	uint8_t *buf;
-} Sbuffer;
 
 //Approximate where something is, by checking the similarity of its parent
 typedef struct simp { 
@@ -803,16 +795,6 @@ int expandbuf ( char **buf, char *src, int *pos ) {
 }
 
 
-//
-int loadyamlfile ( const char *file ) {
-	//load a yaml file
-	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
-	//or you can keep them in some kind of list
-	//that's weird, but it does work
-	return 0;
-}
-
-
 //Gumbo to Table 
 int lua_to_table (lua_State *L, int index, Table *t ) {
 	static int sd;
@@ -929,7 +911,8 @@ void lua_dumptable ( lua_State *L, int *pos, int *sd ) {
 }
 
 
-#if 0
+
+
 void lua_stackdump ( lua_State *L ) {
 	//No top
 	if ( lua_gettop( L ) == 0 )
@@ -969,7 +952,6 @@ void lua_stackdump ( lua_State *L ) {
 	}
 	return;
 }
-#endif
 
 
 //parse_lua
@@ -1074,9 +1056,6 @@ int parse_yaml ( const char *file, Table *t ) {
 #endif
 
 
-
-
-
 //put yaml in string array
 char **load_yaml ( const char *file ) {
 	struct stat sb;
@@ -1088,211 +1067,87 @@ char **load_yaml ( const char *file ) {
 }
 
 
-
-typedef struct completedRequest {
-	const char *url;
-	const char *strippedHttps;
-	const char *statusLine;
-	const char *path;
-	int status;
-} cRequest;
-
-
-
-static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *ud) {
-	size_t realsize = size * nmemb;
-	Sbuffer *sb = (Sbuffer *)ud;
-	uint8_t *ptr = realloc( sb->buf, sb->len + realsize + 1 ); 
-	if ( !ptr ) {
-		fprintf( stderr, "No additional memory to complete request.\n" );
-		return 0;
-	}
-	sb->buf = ptr;
-	memcpy( &sb->buf[ sb->len ], p, realsize );
-	sb->len += realsize;
-	sb->buf[ sb->len ] = 0;
-	return realsize;
-}
-
-
 //Send requests to web pages.
-int send_request ( const char *p ) {
+int send_request ( const char *site, const char *urlpath ) {
 	//Define all of this useful stuff
 	int err, ret, sd, ii, type, len;
 	unsigned int status;
 	Socket s = { .server   = 0, .proto    = "tcp" };
 	gnutls_session_t session;
-	memset( &session, 0, sizeof(gnutls_session_t));
 	gnutls_datum_t out;
 	gnutls_certificate_credentials_t xcred;
-	memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
+	int port = 443;
 	char buf[ 4096 ] = { 0 }, *desc = NULL;
-	uint8_t msg[ 32000 ] = { 0 };
+	char msg[ 32000 ] = { 0 };
 	char GetMsg[2048] = { 0 };
-	char rootBuf[ 128 ] = { 0 };
-	const char *root = NULL; 
-	const char *site; 
-	const char *urlpath;
-	const char *path = NULL;
-	int c=0;
 
 	//A HEAD can be done first to check for any changes, maybe
 	//Then do a GET
+	const char *hostname = site; 
+	const char *path = urlpath;
 	const char GetMsgFmt[] = 
 		"GET %s HTTP/1.1\r\n"
-		"Host: %s\r\n"
+		"Host: %s\r\n\r\n"
 		"User-Agent: %s\r\n\r\n"
 	;
 
-	int sec, port;
-	const char *fp = NULL;
-
-	//You also need to chop 'http' and 'https' off of the thing
-	//if != 0, it's not secure
-	if ( memcmp( "https", p, 5 ) == 0 ) {
-		sec = 1;
-		port = 443;
-		p = &p[8];
-		fp = &p[8];
-	}
-	else if ( memcmp( "http", p, 4 ) == 0 ) {
-		sec = 0;
-		port = 80;
-		p = &p[7];
-		fp = &p[7];
-	}
-	else {
-		sec = 0;
-		port = 80;
-		fp = p;
+	//GnuTLS
+	if ( RUN( !gnutls_check_version("3.4.6") ) ) { 
+		return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
 	}
 
-//fprintf(stderr, "%s\n", p ); exit( 0 );
-
-	//Chop the URL very simply and crudely.
-	if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
-		path = "/";
-		root = p;
-	}
-	else {	
-		memcpy( rootBuf, p, c );
-		path = &p[ c ];
-		root = rootBuf;
+	//Is this needed?
+	if ( RUN( ( err = gnutls_global_init() ) < 0 ) ) {
+		return err_set( 0, "%s\n", gnutls_strerror( err ));
 	}
 
-	//int sec = ( memcmp( "https", p, 5 ) == 0 ); 
-	//int port = sec ? 80 : 443;
-//fprintf(stderr,"%d\n", sec);
+	if ( RUN( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 )) {
+		return err_set( 0, "%s\n", gnutls_strerror( err ));
+	}
+
+	if ( RUN( ( err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 )) {
+		return err_set( 0, "%s\n", gnutls_strerror( err ));
+	}
+	/*
+	//Set client certs this way...
+	gnutls_certificate_set_x509_key_file( xcred, "cert.pem", "key.pem" );
+	*/	
 
 	//Pack a message
 	if ( port != 443 )
-		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
+		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hostname );
 	else {
 		char hbbuf[ 128 ] = { 0 };
-		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
-		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
+		snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", hostname, port );
 		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
 	}
 
-	//write( 2, GetMsg, len ); exit( 0 );
-
 	//Do socket connect (but after initial connect, I need the file desc)
-	if ( RUN( !socket_connect( &s, root, port ) ) ) {
+	if ( RUN( !socket_connect( &s, hostname, port ) ) ) {
 		return err_set( 0, "%s\n", "Couldn't connect to site... " );
 	}
 
 	//Do either an insecure request or a secure request
-	if ( !sec ) { ;
-	#if 1
-		//Use libCurl
-		CURL *curl = NULL;
-		CURLcode res;
-		curl_global_init( CURL_GLOBAL_DEFAULT );
-		curl = curl_easy_init();
-		if ( curl ) {
-			Sbuffer sb = { 0, malloc(1) }; 	
-			curl_easy_setopt( curl, CURLOPT_URL, p );
-			curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, WriteDataCallbackCurl );
-			curl_easy_setopt( curl, CURLOPT_WRITEDATA, (void *)&sb );
-			curl_easy_setopt( curl, CURLOPT_USERAGENT, ua );
-			res = curl_easy_perform( curl );
-			if ( res != CURLE_OK ) {
-				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-				curl_easy_cleanup( curl );
-			}
-			write(2,sb.buf,sb.len);
-			curl_global_cleanup();
-		}	
-	#else
-		struct addrinfo hints, *servinfo, *pp;
-		int rv;
-		int sockfd;
-		char s[ INET6_ADDRSTRLEN ];
-		char b[ 10 ] = { 0 };
-		snprintf( b, 10, "%d", port );	
-		memset( &hints, 0, sizeof( hints ) );
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_STREAM;
-		fprintf(stderr,"Attempting connection to '%s':%d\n", root, port);
-		fprintf(stderr,"Full path (%s)\n", p );
-		//fprintf(stderr, "%s\n", p );
-
-		//Get the address info of the domain here.
-		if ( (rv = getaddrinfo( root, b, &hints, &servinfo )) != 0 ) {
-			fprintf( stderr, "getaddrinfo: %s\n", gai_strerror( rv ) );
-			return 0;
+	if ( 0 ) { ;
+		#if 0
+		//send across socket
+		if ( !socket_tcp_send ( &s, (uint8_t *)GetMsg, strlen(GetMsg) ) ) {
+			return err_set( 0, "%s\n", "Couldn't send TCP packet... " );
 		}
-
-		//Loop and find the right address
-		for ( pp = servinfo; pp != NULL; pp = pp->ai_next ) {
-			if ((sockfd = socket( pp->ai_family, pp->ai_socktype, pp->ai_protocol )) == -1) {	
-				fprintf(stderr,"client: socket error: %s\n",strerror(errno));
-				continue;
-			}
-
-			if (connect(sockfd, pp->ai_addr, pp->ai_addrlen) == -1) {
-				close( sockfd );
-				fprintf(stderr,"client: connect: %s\n",strerror(errno));
-				continue;
-			}
+		
+		//recv socket	
+		if ( !socket_tcp_recv ( &s, msg, (int *)&len ) ) {
+			return err_set( 0, "%s\n", "Couldn't send TCP packet... " );
 		}
-
-		//If we completely failed to connect, do something.
-		if ( pp == NULL ) {
-			fprintf(stderr, "client: failed to connect\n");
-			return 1;
-		}
-	#endif
+		#endif
 	}
 	else {
-		//GnuTLS
-		if ( RUN( !gnutls_check_version("3.4.6") ) ) { 
-			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
-		}
-
-		//Is this needed?
-		if ( RUN( ( err = gnutls_global_init() ) < 0 ) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-		/*
-		//Set client certs this way...
-		gnutls_certificate_set_x509_key_file( xcred, "cert.pem", "key.pem" );
-		*/	
-
 		//Initialize gnutls and set things up
 		if ( RUN( ( err = gnutls_init( &session, GNUTLS_CLIENT ) ) < 0 )) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
-		if ( RUN( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, root, strlen(root)) ) < 0)) {
+		if ( RUN( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, hostname, strlen(hostname)) ) < 0)) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
@@ -1304,7 +1159,7 @@ int send_request ( const char *p ) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
-		gnutls_session_set_verify_cert( session, root, 0 );
+		gnutls_session_set_verify_cert( session, hostname, 0 );
 		//fprintf( stderr, "s.fd: %d\n", s.fd );
 		gnutls_transport_set_int( session, s.fd );
 		gnutls_handshake_set_timeout( session, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT );
@@ -1338,7 +1193,7 @@ int send_request ( const char *p ) {
 		//This is a sloppy quick way to handle EAGAIN
 		int statter=0;
 		while ( statter < 5 ) {
-			if ( RUN( (ret = gnutls_record_recv( session, msg, sizeof(msg))) == 0 ) ) {
+			if ( RUN( (ret = gnutls_record_recv( session, buf, sizeof(buf))) == 0 ) ) {
 				fprintf( stderr, " - Peer has closed the TLS Connection\n" );
 				//goto end;
 				statter = 5;
@@ -1365,10 +1220,9 @@ int send_request ( const char *p ) {
 		if ( ret > 0 ) {
 			fprintf( stdout, "Recvd %d bytes:\n", ret );
 			fflush( stdout );
-			write( 1, msg, ret );
+			write( 1, buf, ret );
 			fflush( stdout );
 			fputs( "\n", stdout );
-			len = ret;
 		}
 
 		if (RUN((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 )) {
@@ -1377,8 +1231,6 @@ int send_request ( const char *p ) {
 	}
 
 	//Hey, here's our message
-	fprintf(stderr, "MESSAGE:\n" );
-	fprintf(stderr,"%d\n", len);
 	write( 1, msg, len );
 
 end:
@@ -1402,9 +1254,6 @@ Option opts[] = {
  ,{ "-s", "--node-start",    "Use the tags from this YAML file", 'n' }
  ,{ "-e", "--node-end",      "Use the tags from this YAML file", 'n' }
  ,{ "-o", "--output",        "Send output to this file", 's' }
-
-	/*...*/
- ,{ "-p", "--parse",         "Parse file", 's' }
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -1442,47 +1291,8 @@ int main( int argc, char *argv[] ) {
 	char *ps[] = { NULL, NULL };
 	char **p = ps;
 	int len=0;
-#if 0
-http://jeffsautosales.com/inventory.asp
-https://www.heritagerides.com/inventory.aspx
-http://www.mmautonc.com/inventory/lumberton-used-cars?p1=5&p2=10000
-https://lamotorsnc.com//newandusedcars.aspx?clearall=1
-http://shopthecarport.com/inventory
-https://www.importmotorsportsnc.com/cars-for-sale
-https://www.nolimitmotorsports.com/inventory.aspx?cursort=asc&pagesize=500
-https://plottcars.com/inventory
-http://www.autoshowcasesc.com/inventory/Indian-Land-Used-Cars
-https://paylesscardealsofhickory.com/inventory
-https://www.callawaymotorco.com/inventory/
-https://www.wesleyautomotive.com/inventory/?pager=20&page_no=1
-https://www.autoslimited.com/cars-for-sale
-http://www.goosecreekautomotive.com/inventory/mercedes-benz-for-sale-charlotte
-https://www.classicautonc.com/inventory.aspx
-#endif
 
-const char *listurls[] = {
-  "http://jeffsautosales.com/inventory.asp"
-#if 0	
-, "https://lamotorsnc.com//newandusedcars.aspx?clearall=1"
-, "http://www.ramarcollins.com"
-,"www.heritagerides.com/inventory.aspx"
-,"www.mmautonc.com/inventory/lumberton-used-cars?p1=5&p2=10000"
-,"lamotorsnc.com/newandusedcars.aspx?clearall=1"
-,"shopthecarport.com/inventory"
-,"www.importmotorsportsnc.com/cars-for-sale"
-,"www.nolimitmotorsports.com/inventory.aspx?cursort=asc&pagesize=500"
-,"plottcars.com/inventory"
-,"www.autoshowcasesc.com/inventory/Indian-Land-Used-Cars"
-,"paylesscardealsofhickory.com/inventory"
-,"www.callawaymotorco.com/inventory/"
-,"www.wesleyautomotive.com/inventory/?pager=20&page_no=1"
-,"www.autoslimited.com/cars-for-sale"
-,"www.goosecreekautomotive.com/inventory/mercedes-benz-for-sale-charlotte"
-,"www.classicautonc.com/inventory.aspx"
-#endif
-};
-
-	send_request( *listurls );
+	send_request( );
 exit( 0 );
 	//Get source somewhere.
 	#if 0
