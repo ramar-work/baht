@@ -1,4 +1,0 @@
---2019-02-09 23:00:54--  https://www.treadzautoz.com/inventory/
-Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
-Resolving www.treadzautoz.com (www.treadzautoz.com)... failed: Temporary failure in name resolution.
-wget: unable to resolve host address 'www.treadzautoz.com'

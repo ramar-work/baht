@@ -1,4 +1,0 @@
---2019-02-09 23:00:54--  https://cabarruscountycars.com/legacy
-Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
-Resolving cabarruscountycars.com (cabarruscountycars.com)... failed: Temporary failure in name resolution.
-wget: unable to resolve host address 'cabarruscountycars.com'

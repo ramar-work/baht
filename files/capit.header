@@ -1,4 +1,0 @@
---2019-02-09 23:00:54--  https://capitalford.com/vehicles?filter
-Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
-Resolving capitalford.com (capitalford.com)... failed: Temporary failure in name resolution.
-wget: unable to resolve host address 'capitalford.com'

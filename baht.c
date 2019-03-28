@@ -144,6 +144,7 @@ typedef struct stretchBuffer {
 	uint8_t *buf;
 } Sbuffer;
 
+
 //Approximate where something is, by checking the similarity of its parent
 typedef struct simp { 
 	LiteTable *parent; //Check the parent at this stage 
@@ -164,6 +165,16 @@ typedef struct nodeset {
 	const char *key;      //Key that the value corresponds to
 	const char *string;   //String
 } NodeSet;
+
+
+//
+typedef struct completedRequest {
+	const char *url;
+	const char *strippedHttps;
+	const char *statusLine;
+	const char *path;
+	int status;
+} cRequest;
 
 
 typedef struct nodeblock {
@@ -328,7 +339,7 @@ int load_page ( const char *file, char **dest, int *destlen ) {
 	return 1;
 }
 
-
+#if 0
 //Grab a URI and write to buffer
 int load_www ( const char *address, unsigned char **dest, int *destlen ) {
 	int fn;
@@ -349,6 +360,7 @@ int load_www ( const char *address, unsigned char **dest, int *destlen ) {
 	*destlen = 0;
 	return 1;
 }
+#endif
 
 
 //Build table from yamlList
@@ -735,33 +747,6 @@ yamlList **keys_from_ht ( Table *t ) {
 	return w.list;
 }
 
-#if 0
-yamlList ** find_keys_in_mt ( Table *t, yamlList *tn, int *len ) {
-	yamlList **sql = NULL;
-	int h=0, sqlLen = 0;
-	while ( tn->k ) {
-		if ( !tn->v )
-			;//fprintf( stderr, "No target value for column %s\n", tn->k );	
-		else {
-			//fprintf( stderr, "hash of %s: %d\n", tn->v, lt_geti( t, tn->v ) );
-			if ( (h = lt_geti( t, tn->v )) == -1 )
-				0;
-			else {
-				yamlList *kv = malloc( sizeof(yamlList) );
-				kv->k = tn->k;
-				kv->v =	lt_text_at( t, h );  
-				ADD_ELEMENT( sql, sqlLen, yamlList *, kv ); 
-			}
-		}
-		tn++;
-	}
-	yamlList *term = malloc( sizeof(yamlList) );
-	term->k = NULL;
-	ADD_ELEMENT( sql, sqlLen, yamlList *, term );
-	*len = sqlLen;
-	return sql;
-}
-#endif
 
 //
 yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
@@ -800,16 +785,6 @@ int expandbuf ( char **buf, char *src, int *pos ) {
 	memcpy( &buf[ *pos ], src, strlen( src ) );
 	*pos += strlen( src );	
 	return 1;
-}
-
-
-//
-int loadyamlfile ( const char *file ) {
-	//load a yaml file
-	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
-	//or you can keep them in some kind of list
-	//that's weird, but it does work
-	return 0;
 }
 
 
@@ -929,49 +904,6 @@ void lua_dumptable ( lua_State *L, int *pos, int *sd ) {
 }
 
 
-#if 0
-void lua_stackdump ( lua_State *L ) {
-	//No top
-	if ( lua_gettop( L ) == 0 )
-		return;
-
-	//Loop again, but show the value of each key on the stack
-	for ( int pos = 1; pos <= lua_gettop( L ); pos++ ) {
-		int t = lua_type( L, pos );
-		const char *type = lua_typename( L, t );
-		fprintf( stderr, "[%3d] => ", pos );
-
-		if ( t == LUA_TSTRING )
-			fprintf( stderr, "(%8s) %s", type, lua_tostring( L, pos ));
-		else if ( t == LUA_TFUNCTION )
-			fprintf( stderr, "(%8s) %p", type, (void *)lua_tocfunction( L, pos ) );
-		else if ( t == LUA_TNUMBER )
-			fprintf( stderr, "(%8s) %lld", type, (long long)lua_tointeger( L, pos ));
-		else if ( t == LUA_TBOOLEAN)
-			fprintf( stderr, "(%8s) %s", type, lua_toboolean( L, pos ) ? "true" : "false" );
-		else if ( t == LUA_TTHREAD )
-			fprintf( stderr, "(%8s) %p", type, lua_tothread( L, pos ) );
-		else if ( t == LUA_TLIGHTUSERDATA || t == LUA_TUSERDATA )
-			fprintf( stderr, "(%8s) %p", type, lua_touserdata( L, pos ) );
-		else if ( t == LUA_TNIL ||  t == LUA_TNONE )
-			fprintf( stderr, "(%8s) %p", type, lua_topointer( L, pos ) );
-		else if ( t == LUA_TTABLE ) {
-		#if 0
-			fprintf( stderr, "(%8s) %p", type, lua_topointer( L, pos ) );
-		#else
-			fprintf( stderr, "(%8s) %p {\n", type, lua_topointer( L, pos ) );
-			int sd = 1;
-			lua_dumptable( L, &pos, &sd );
-			fprintf( stderr, "}" );
-		#endif
-		}	
-		fprintf( stderr, "\n" );
-	}
-	return;
-}
-#endif
-
-
 //parse_lua
 int parse_lua ( Table *t, const char *file ) {
 	lua_State *L = luaL_newstate(); 
@@ -992,110 +924,7 @@ int parse_lua ( Table *t, const char *file ) {
 }
 
 
-//...
-char *scopy ( char *b, int bl ) {
-	char *a = malloc( bl + 1 );
-	memset( a, 0, bl + 1 );
-	memcpy( a, b, bl );
-	return a;
-}
-
-
-#if 0
-//TODO: This is a dependency-less way of handling Table maps, but it still doesn't solve the function execution problem.
-(Using Lua does, but adds some weight to the library)
-//put yaml in a Table
-int parse_yaml ( const char *file, Table *t ) {
-	//load a yaml file
-	//you can combine supernodes and subnodes (e.g. page.url or elements.model)
-	//or you can keep them in some kind of list
-	//that's weird, but it does work
-	struct stat sb;
-	int fd;
-	char buf[ 2048 ] = {0};
-	if (	stat( file, &sb ) == -1 ) 
-		return 0;
-
-	if ( (fd = open( file, O_RDONLY )) == -1 )
-		return 0;
-
-	if ( read( fd, buf, sb.st_size ) == -1 )
-		return 0;
-
-	//read the buf
-	int boggs = 0;
-	char *k = NULL;
-	int kl = 0;
-	meminit( m, 0, 0 );	
-	while ( strwalk( &m, buf, ": \n" ) ) {
-
-		//start at first key
-		if ( m.chr != ':' && !boggs ) 
-			continue;
-		else {
-			if ( m.chr == ':' ) boggs = 1; 
-		}	
-
-		//this is a key
-		if ( m.chr == ':' ) {
-		#if 1
-			scopy( &buf[ m.pos ], m.size );
-		#else
-			k = &buf[ m.pos ];
-			kl = m.size;
-
-			//Copy string
-			char *a = malloc( m.size + 1 );
-			memset( a, 0, m.size + 1 );
-			memcpy( a, k, kl );	
-		#endif
-		}
-
-
-		if ( m.chr == '\n' && buf[ m.next ] == '\n' ) {
-			fprintf(stderr, "next\n" );
-		}
-
-		if ( m.chr == '\n' && buf[ m.next ] == ' ' ) {
-			//save the key as a prefix?
-			fprintf(stderr, "pref\n" );
-		}
-
-		fprintf( stderr, "mem[ p: %d, n: %d, s: %d, it: %d, chr: '%c'\n", 
-			m.pos, m.next, m.size, m.it, m.chr );
-
-		write( 2, &buf[ m.pos ], m.size ); 
-		getchar();	
-		
-	}  
-
-	return 1;
-}
-#endif
-
-
-//put yaml in string array
-char **load_yaml ( const char *file ) {
-	struct stat sb;
-	int stt = stat( "example.yaml", &sb );
-	int fd = open( "example.yaml", O_RDONLY );
-	char buf[ 2048 ] = {0};
-	read( fd, buf, sb.st_size );
-	return NULL;
-}
-
-
-//
-typedef struct completedRequest {
-	const char *url;
-	const char *strippedHttps;
-	const char *statusLine;
-	const char *path;
-	int status;
-} cRequest;
-
-
-//
+//Write data to some kind of buffer with something
 static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *ud) {
 	size_t realsize = size * nmemb;
 	Sbuffer *sb = (Sbuffer *)ud;
@@ -1113,39 +942,10 @@ static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *u
 
 
 //Send requests to web pages.
-int send_request ( const char *p ) {
-	//Define all of this useful stuff
-	int err, ret, sd, ii, type, len;
-	unsigned int status;
-	Socket s = { .server   = 0, .proto    = "tcp" };
-	gnutls_session_t session;
-	memset( &session, 0, sizeof(gnutls_session_t));
-	gnutls_datum_t out;
-	gnutls_certificate_credentials_t xcred;
-	memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
-	char buf[ 4096 ] = { 0 }, *desc = NULL;
-	uint8_t msg[ 32000 ] = { 0 };
-	char GetMsg[2048] = { 0 };
-	char rootBuf[ 128 ] = { 0 };
-	const char *root = NULL; 
-	const char *site; 
-	const char *urlpath;
-	const char *path = NULL;
-	int c=0;
-
-	//A HEAD can be done first to check for any changes, maybe
-	//Then do a GET
-	const char GetMsgFmt[] = 
-		"GET %s HTTP/1.1\r\n"
-		"Host: %s\r\n"
-		"User-Agent: %s\r\n\r\n"
-	;
-
-	int sec, port;
+int load_www ( const char *p, char **dest, int *destlen ) {
+	int c=0, sec, port;
 	const char *fp = NULL;
 
-	//You also need to chop 'http' and 'https' off of the thing
-	//if != 0, it's not secure
 	if ( memcmp( "https", p, 5 ) == 0 ) {
 		sec = 1;
 		port = 443;
@@ -1164,34 +964,10 @@ int send_request ( const char *p ) {
 		fp = p;
 	}
 
-//fprintf(stderr, "%s\n", p ); exit( 0 );
-
-	//Chop the URL very simply and crudely.
-	if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
-		path = "/";
-		root = p;
-	}
-	else {	
-		memcpy( rootBuf, p, c );
-		path = &p[ c ];
-		root = rootBuf;
-	}
-
-	//Pack a message
-	if ( port != 443 )
-		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
-	else {
-		char hbbuf[ 128 ] = { 0 };
-		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
-		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
-		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
-	}
-
-	//Do socket connect (but after initial connect, I need the file desc)
-	if ( RUN( !socket_connect( &s, root, port ) ) ) {
-		return err_set( 0, "%s\n", "Couldn't connect to site... " );
-	}
-
+	//Although it is definitely easier to use CURL to handle the rest  of the request, 
+	//dealign with TLS at C level is more complicated than it probably should be.  I
+	//may need the other condition just to handle insecure requests...
+#if 1
 	//Do either an insecure request or a secure request
 	if ( !sec ) { ;
 		//Use libCurl
@@ -1210,9 +986,78 @@ int send_request ( const char *p ) {
 				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 				curl_easy_cleanup( curl );
 			}
-			write(2,sb.buf,sb.len);
+			//write(2,sb.buf,sb.len);
 			curl_global_cleanup();
+			*destlen = sb.len;
+			*dest = (char *)sb.buf;
 		}	
+	}
+	else {
+		fprintf( stderr, PROG "Can't handle TLS requests, yet!\n" );
+		exit( 0 );
+	}
+#else
+	//Define all of this useful stuff
+	int err, ret, sd, ii, type, len;
+	unsigned int status;
+	Socket s = { .server   = 0, .proto    = "tcp" };
+	gnutls_session_t session;
+	memset( &session, 0, sizeof(gnutls_session_t));
+	gnutls_datum_t out;
+	gnutls_certificate_credentials_t xcred;
+	memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
+	char *desc = NULL;
+	uint8_t msg[ 32000 ] = { 0 };
+	char buf[ 4096 ] = { 0 }; 
+	char GetMsg[2048] = { 0 };
+	char rootBuf[ 128 ] = { 0 };
+	const char *root = NULL; 
+	const char *site = NULL; 
+	const char *urlpath = NULL;
+	const char *path = NULL;
+	int c=0, sec, port;
+
+	//A HEAD can be done first to check for any changes, maybe
+	//Then do a GET
+	const char GetMsgFmt[] = 
+		"GET %s HTTP/1.1\r\n"
+		"Host: %s\r\n"
+		"User-Agent: %s\r\n\r\n"
+	;
+
+	//You also need to chop 'http' and 'https' off of the thing
+	//if != 0, it's not secure
+
+//fprintf(stderr, "%s\n", p ); exit( 0 );
+
+	//Chop the URL very simply and crudely.
+	if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
+		path = "/";
+		root = p;
+	}
+	else {	
+		memcpy( rootBuf, p, c );
+		path = &p[ c ];
+		root = rootBuf;
+	}
+
+	//Do socket connect (but after initial connect, I need the file desc)
+	if ( RUN( !socket_connect( &s, root, port ) ) ) {
+		return err_set( 0, "%s\n", "Couldn't connect to site... " );
+	}
+
+	//Pack a message
+	if ( port != 443 )
+		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
+	else {
+		char hbbuf[ 128 ] = { 0 };
+		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
+		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
+		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
+	}
+
+	if ( !sec ) {
+		;
 	}
 	else {
 		//GnuTLS
@@ -1336,6 +1181,7 @@ end:
 	gnutls_deinit( session );
 	gnutls_certificate_free_credentials( xcred );
 	gnutls_global_deinit();	
+#endif
 	return 1;
 }
 
@@ -1432,8 +1278,7 @@ const char *listurls[] = {
 #endif
 };
 
-	send_request( *listurls );
-exit( 0 );
+	//send_request( *listurls );
 	//Get source somewhere.
 	#if 0
 	if ( 1 ) {
@@ -1456,10 +1301,18 @@ exit( 0 );
 		*p = (char *)b;
 	}
 	else if ( opt_set( opts, "--url" ) ) {
-		sc = opt_get( opts, "--url" ).s;
-		load_www( sc, (unsigned char **)&b, &len );
+		//sc = opt_get( opts, "--url" ).s;
+		if ( !(sc = opt_get( opts, "--url" ).s) ) {
+			return err_print( 0, "%s", "No URL specified." );
+		}
+		//fprintf( stderr, "%s\n", sc ); exit(0);	
+		if ( !load_www( sc, &b, &len ) ) {
+			return err_print( 0, "Error loading URL '%s' - %s.", sc, _errbuf );
+		}
+
+		fprintf(stderr, "%d\n", len ); exit( 0 );
+
 		*p = (char *)b;
-		return err_print( 0, "URLS don't work right now, sorry." );
 	}
 	#if 0
 	//Open a directory?
