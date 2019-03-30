@@ -13,7 +13,7 @@ LDFLAGS=-lgumbo -llua -lgnutls -lcurl
 
 # go - Build the 'baht' scraper tool
 go: vendor/single.o
-	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME) && ./$(NAME) -f files/carri.html
+	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME) && ./$(NAME) -l files/carribeanmotors.lua
 
 # wop - Build the 'baht' scraper tool and run a dump 
 wop: vendor/single.o

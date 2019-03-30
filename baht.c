@@ -159,6 +159,14 @@ typedef struct lazy {
 	short ind, len;//, *arr;
 } oCount; 
 
+struct why { int len; yamlList **list; };
+
+typedef struct wwwResponse {
+	int status, len;
+	uint8_t *data;
+	char *redirect_uri;
+//char *uri;
+} wwwResponse;
 
 typedef struct nodeset {
 	int hash;             //Stored hash
@@ -690,7 +698,6 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	return 1;
 }
 
-struct why { int len; yamlList **list; };
 
 //a dumb hacky way to do this is:
 //3keyvalue 
@@ -944,16 +951,8 @@ static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *u
 }
 
 
-typedef struct abc {
-	int status, len;
-	uint8_t *data;
-	char *redirect_uri;
-//char *uri;
-} wwwResponse;
-
-
 //Send requests to web pages.
-int load_www ( const char *p, char **dest, int *destlen ) {
+int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 	int c=0, sec, port;
 	const char *fp = NULL;
 
@@ -1185,6 +1184,9 @@ int load_www ( const char *p, char **dest, int *destlen ) {
 				//fprintf(stderr,"%s\n",*lines);
 				if ( memcmp( msg, *lines, strlen(*lines) ) == 0 ) {
 					stat = 1;
+					char statWord[ 10 ] = {0};
+					memcpy( statWord, &msg[ 9 ], 3 );
+					r->status = atoi( statWord );
 					break;
 				}
 				lines++;
@@ -1199,7 +1201,8 @@ int load_www ( const char *p, char **dest, int *destlen ) {
 				char lenString[ 24 ] = {0};
 				uint8_t bmsg[ 327680 ] = {0};
 				int pl = 0;
-
+	
+				//
 				if ( (pos = memstrat( msg, "Content-Length", ret )) == -1 ) {
 					fprintf(stderr,"Error out, no length, somethings' wrong...\n" );
 				}
@@ -1207,6 +1210,7 @@ int load_www ( const char *p, char **dest, int *destlen ) {
 				s = memchrat( &msg[ pos ], ' ', ret - pos );	
 				memcpy( lenString, &msg[ pos + (s+1) ], r - s );
 				len = atoi( lenString );
+				//r->len = len;
 
 				//Read everything
 				while ( len ) {
@@ -1453,13 +1457,27 @@ end:
 #endif
 
 
+//
+const char sqlfmt[] = 
+	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );"
+#if 0
+	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+#endif
+;
+
+
 //Option
 Option opts[] = {
-	{ "-f", "--file",          "Get a file on the command line.", 's' }
+	//Things on things
+  { "-l", "--load",          "Load a file on the command line.", 's' }
+ ,{ "-k", "--show-full-key", "Show a full key"  }
+#if 0
+ ,{ "-f", "--file",          "Get a file on the command line.", 's' }
  ,{ "-u", "--url",           "Get something from the WWW", 's' }
  ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
- ,{ "-k", "--show-full-key", "Show a full key"  }
  ,{ "-q", "--sql",           "Dump SQL"  }
+#endif
 
 	/*Dump options*/
  ,{ "-s", "--node-start",    "Use the tags from this YAML file", 'n' }
@@ -1467,7 +1485,7 @@ Option opts[] = {
  ,{ "-o", "--output",        "Send output to this file", 's' }
 
 	/*...*/
- ,{ "-p", "--parse",         "Parse file", 's' }
+ ,{ "-p", "--parse",         "Parse file and stop", 's' }
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -1505,287 +1523,197 @@ int main( int argc, char *argv[] ) {
 	char *ps[] = { NULL, NULL };
 	char **p = ps;
 	int len=0;
+	int blen=0;
 	char *luaFile = NULL;
-
-	//Get source somewhere.
-	#if 0
-	//Load from a static buffer in memory somewhere
-	if ( 1 ) {
-		block = (char *)yamama;
-		len = strlen( block );
-		*p = (char *)block;
-	}
-	else
-	#endif
-	if ( opt_set( opts, "--file" ) ) {
-	#if 1
-		if ( !( luaFile = opt_get( opts, "--file" ).s) ) {
-			return err_print( 0, "%s", "No file specified." );	
-		}
-	#else
-		if ( !(sc = opt_get( opts, "--file" ).s) ) {
-			return err_print( 0, "%s", "No file specified." );	
-		}
-
-		if ( !load_page( sc, &b, &len ) ) {
-			return err_print( 0, "Error loading page '%s' - %s.", sc, _errbuf );
-		}
-
-		*p = (char *)b;
-	#endif
-	}
-	else if ( opt_set( opts, "--url" ) ) {
-		//sc = opt_get( opts, "--url" ).s;
-		if ( !(sc = opt_get( opts, "--url" ).s) ) {
-			return err_print( 0, "%s", "No URL specified." );
-		}
-		//fprintf( stderr, "%s\n", sc ); exit(0);	
-		if ( !load_www( sc, &b, &len ) ) {
-			return err_print( 0, "Error loading URL '%s' - %s.", sc, _errbuf );
-		}
-
-		fprintf(stderr, "%d\n", len ); exit( 0 );
-
-		*p = (char *)b;
-	}
-	#if 0
-	//Open a directory?
-	else if ( opt_set( opts, "--directory" ) ) {
-		srcsrc = opt_get( opts, "--directory" ).s;
-		;//load_www( srcsrc, &block, &len );
-		//Copy things to things
-		*p = (char *)block;
-	}
-	#endif
+	wwwResponse www;
 
 #if 1
+	//Load a Lua file
+	if ( opt_set( opts, "--load" ) ) {
+		luaFile = opt_get( opts, "--load" ).s;
+		if ( !luaFile ) {
+			return err_print( 0, "%s", "No file specified." );	
+		}		
+	}
+	
+	//Show a full key
 	optKeydump = opt_set( opts, "--show-full-key" ); 
-#else
-	//Let's stop real quick and figure out a consistent data structure for use with this.
-	//Supposing I have multiple of this thing, I want something that looks like:
-	DType {
-		const char *src;      //the content that will be parsed by gumbo
-		const char *yaml;     //yaml(or whatever) to help me frame that
-		RecordSet records[];  //???, I think this was incase I read from db... not sure how important it is...
-		int srctype; ( enum WWW, FILE, INPUT, ... )
-		
-		//could go ahead and include all needed tables as well...
-		//same with root and jump
-		//same with all of those damned buffers...
-		//could even do the same with sql, provided everything were going to the same place.
-		//we'd have a MASSIVE set of sql...
-		//however, would it be easier to combine these at the shell level?
-		//I could run them in parallel, but I'd still have issues...
-	}
-
-	#if 0
-	if ( !opt_set( opts, "--backend" ) ) 
-		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-	else {
-		const char efmt[] = "SQL backend not chosen (try --mssql, --mysql, or --pgsql)" );
-		return err_print( 0, "%s", efmt );
-	}
-	#else
-	if ( opt_set( opts, "--mysql" ) ) 
-		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-	else if ( opt_set( opts, "--pgsql" ) ) 
-		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-	else if ( opt_set( opts, "--mssql" ) ) 
-		sqlfmt = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-	else {
-		return err_print( 0, "%s", "SQL backend not chosen (try --mssql, --mysql, or --pgsql)" );
-	} 
-	#endif
-#endif
-
-#if 0
-	//???
-	if ( !*p ) {
-		return err_print( 0, "No --file or --url specified.  Nothing to do." );
-	}
-#endif
 
 	//You probably need to stop here
 	if ( !luaFile ) {
 		return err_print( 0, "%s", "A Lua file must be specified for baht to work.." );
 	}
-
-	//Loop through things
-#if 0
-	while ( *p ) {	
+#else
 #endif
-		//Define all of that mess up here
-		int rootNode, jumpNode, activeNode;
-		uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
-		char *fkey=NULL, *rkey=NULL;
-		NodeSet *root=NULL, *jump=NULL;
 
-		//Initialize the table of final values here
-		Table *tHtml = malloc(sizeof(Table)); 
-		lt_init( tHtml, NULL, 33333 );  
+	//Define all of that mess up here
+	int rootNode, jumpNode, activeNode;
+	uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
+	char *fkey=NULL, *rkey=NULL;
+	NodeSet *root=NULL, *jump=NULL;
 
-		//Initialize the file keys and parse a file here
-		Table *tYaml = malloc(sizeof(Table));
-		lt_init( tYaml, NULL, 127 );  
-		parse_lua( tYaml, luaFile );	
-		yamlList **ky = keys_from_ht( tYaml );
+	//Initialize the table of final values here
+	Table *tHtml = malloc(sizeof(Table)); 
+	lt_init( tHtml, NULL, 33333 );  
 
-		//Dump all found keys
-		//while ( (*keys) ) { printf( "%s\n", (*keys)->k ); keys++; }
+	//Initialize the file keys and parse a file here
+	Table *tYaml = malloc(sizeof(Table));
+	lt_init( tYaml, NULL, 127 );  
+	parse_lua( tYaml, luaFile );	
+	yamlList **ky = keys_from_ht( tYaml );
 
-#if 1
-		//Set the page URL and go retrieve it 
-		char *pageUrl = lt_text( tYaml, "page.url" );
-		//fprintf(stderr,"%s\n",pageUrl);	
-		char *b=NULL;
-		int blen=0;
-		if ( !load_www( pageUrl, &b, &blen ) ) {
-			return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
-		}
-		//write(2,b,blen); exit(0);
-		//get_page( pageUrl );
-#endif
-		//There is a "repeat" key as well, which will just do more requests if necessary to different pages.
-		//...
+	//Dump all found keys
+	//while ( (*keys) ) { printf( "%s\n", (*keys)->k ); keys++; }
 
-		//Set the root node and jump node
-		char *rootString = lt_text( tYaml, "root.origin" );
-		char *jumpString = lt_text( tYaml, "root.start" );
-		//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
-
-		//Create a hash table of all the HTML
-		//if ( !parse_html( tHtml, *p, strlen( *p )) ) {
-		if ( !parse_html( tHtml, b, blen) ) {
-			return err_print( 0, "Couldn't parse HTML to hash Table:\n%s", *p );
-		}
-
-		//Set some references
-		root = &nodes[ 0 ].rootNode;
-		jump = &nodes[ 0 ].jumpNode;
-
-		//Find the root node.
-		if ( ( rootNode = lt_geti( tHtml, rootString ) ) == -1 ) {
-			return err_print( 0, "string '%s' not found.\n", rootString );
-		}
-
-		//Find the "jump" node.
-		if ( !jumpString ) 
-			jumpNode = rootNode;
-		else {
-			if ( ( jumpNode = lt_geti( tHtml, jumpString ) ) == -1 ) {
-				return err_print( 0, "jump string '%s' not found.\n", jumpString );
-			}
-		}
-		//printf( "%d, %d\n", rootNode, jumpNode ); exit( 0 );
-
-		//Get parent and do work.
-		fkey = (char *)lt_get_full_key( tHtml, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
-		rkey = (char *)lt_get_full_key( tHtml, rootNode, rkbuf, sizeof(rkbuf) - 1 );
-		SET_INNER_PROC( pp, tHtml, rootNode, jumpNode, fkey, rkey );
-		//print_innerproc( &pp );printf( "%s, %s\n", fkey, rkey );
-
-		//Start the extraction process 
-		lt_exec( tHtml, &pp, create_frame );
-
-		//Build individual tables for each.
-		for ( int i=0; i<pp.hlistLen; i++ ) {
-			//TODO: For our purposes, 5743 is the final node.  Fix this.
-			int start = pp.hlist[ i ];
-			int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
-
-			//Create a table to track occurrences of hashes
-			build_ctck( tHtml, start, end - 1 ); 
-
-			//TODO: Simplify this
-			Table *th = malloc( sizeof(Table) );
-			lt_init( th, NULL, 7777 );
-			ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
-			pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
-
-			//Create a new table
-			lt_exec_complex( tHtml, start, end - 1, &pp, build_individual );
-			lt_lock( pp.ctable );
-
-			if ( optKeydump ) {
-				lt_kdump( pp.ctable );
-			}
-		}
-
-		//Destroy the source table. 
-		lt_free( tHtml );
-
-		//Now check that each table has something
-		for ( int i=0; i<pp.tlistLen; i++ ) {
-			Table *tl = pp.tlist[ i ];
-
-			//TODO: Simplify this, by a large magnitude...
-			//yamlList *tn = testNodes;
-			int baLen = 0, vLen = 0, mtLen = 0;
-		#if 0
-			char *babuf=NULL, *vbuf=NULL, *fbuf=NULL;
-		#else
-			char babuf[ 20000 ] = {0};
-			char vbuf[ 100000 ] = {0};
-			char fbuf[ 120000 ] = {0};
-		#endif
-
-			//I need to loop through the "block" and find each hash
-			yamlList **keys = find_keys_in_mt( tl, ky, &mtLen );
-		#if 0
-			while ( (*keys)->k ) {
-				fprintf( stderr, "%s - %s\n", (*keys)->k, (*keys)->v );
-				keys++;
-			}
-		#else
-		#endif
-
-			//Then loop through matched keys and values
-			while ( (*keys)->k ) {
-			#if 0
-				expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
-				expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
-				keys++;
-			#else
-				memcpy( &babuf[ baLen ], (*keys)->k, strlen( (*keys)->k ) ); 
-				baLen += strlen( (*keys)->k ); 
-
-				//Add actual words
-				memcpy( &vbuf[ vLen ], "\"", 1 );
-				memcpy( &vbuf[ vLen + 1 ], (*keys)->v, strlen( (*keys)->v ) ); 
-				vLen += strlen( (*keys)->v ) + 1;
-				memcpy( &vbuf[ vLen ], "\"", 1 );
-				vLen ++;
-
-				//Add a comma
-				memcpy( &babuf[ baLen ], ", ", 2 );
-				memcpy( &vbuf[ vLen ], ", ", 2 );
-				keys++, baLen+= 2, vLen+= 2; 
-			#endif
-			} 
-
-			//Create a SQL creation string, if any hashes were found.
-			if ( mtLen > 1 ) {
-			#if 0
-				babuf[ baLen-2 ]='\0', vbuf[ vLen-2 ]='\0';
-				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
-				free( babuf );
-				free( vbuf );
-			#else
-				baLen -= 2, vLen -= 2;
-				babuf[ baLen ] = '\0';
-				vbuf[ vLen ] = '\0';
-				snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
-			#endif
-				fprintf( stdout, "%s\n", fbuf );
-			}
-
-			lt_free( tl );
-		}
-
-#if 0
-		p++;
+	//Set the page URL and go retrieve it 
+	char *pageUrl = lt_text( tYaml, "page.url" );
+	if ( !load_www( pageUrl, &b, &blen, &www ) ) {
+		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
 	}
-#endif
+
+	//...
+	www.len = blen;
+	www.data = (uint8_t *)b;
+
+	//Set the root node and jump node
+	char *rootString = lt_text( tYaml, "root.origin" );
+	char *jumpString = lt_text( tYaml, "root.start" );
+	//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
+
+	//Create a hash table of all the HTML
+	//if ( !parse_html( tHtml, b, blen ) ) {
+	if ( !parse_html( tHtml, (char *)www.data, www.len ) ) {
+		return err_print( 0, "Couldn't parse HTML to hash Table:\n%s", *p );
+	}
+
+	//Stop at parsing
+	if ( opt_set( opts, "--parse" ) ) {
+		lt_kdump( tHtml );
+		exit( 0 );
+	}
+
+	//Set some references
+	root = &nodes[ 0 ].rootNode;
+	jump = &nodes[ 0 ].jumpNode;
+
+	//Find the root node.
+	if ( ( rootNode = lt_geti( tHtml, rootString ) ) == -1 ) {
+		return err_print( 0, "string '%s' not found.\n", rootString );
+	}
+
+	//Find the "jump" node.
+	if ( !jumpString ) 
+		jumpNode = rootNode;
+	else {
+		if ( ( jumpNode = lt_geti( tHtml, jumpString ) ) == -1 ) {
+			return err_print( 0, "jump string '%s' not found.\n", jumpString );
+		}
+	}
+	//printf( "%d, %d\n", rootNode, jumpNode ); exit( 0 );
+
+	//Get parent and do work.
+	fkey = (char *)lt_get_full_key( tHtml, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
+	rkey = (char *)lt_get_full_key( tHtml, rootNode, rkbuf, sizeof(rkbuf) - 1 );
+	SET_INNER_PROC( pp, tHtml, rootNode, jumpNode, fkey, rkey );
+	//print_innerproc( &pp );printf( "%s, %s\n", fkey, rkey );
+
+	//Start the extraction process 
+	lt_exec( tHtml, &pp, create_frame );
+
+	//Build individual tables for each.
+	for ( int i=0; i<pp.hlistLen; i++ ) {
+		//TODO: For our purposes, 5743 is the final node.  Fix this.
+		int start = pp.hlist[ i ];
+		int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
+
+		//Create a table to track occurrences of hashes
+		build_ctck( tHtml, start, end - 1 ); 
+
+		//TODO: Simplify this
+		Table *th = malloc( sizeof(Table) );
+		lt_init( th, NULL, 7777 );
+		ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
+		pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
+
+		//Create a new table
+		lt_exec_complex( tHtml, start, end - 1, &pp, build_individual );
+		lt_lock( pp.ctable );
+
+		if ( optKeydump ) {
+			lt_kdump( pp.ctable );
+		}
+	}
+
+	//Destroy the source table. 
+	lt_free( tHtml );
+
+	//Now check that each table has something
+	for ( int i=0; i<pp.tlistLen; i++ ) {
+		Table *tl = pp.tlist[ i ];
+
+		//TODO: Simplify this, by a large magnitude...
+		//yamlList *tn = testNodes;
+		int baLen = 0, vLen = 0, mtLen = 0;
+	#if 0
+		char *babuf=NULL, *vbuf=NULL, *fbuf=NULL;
+	#else
+		char babuf[ 20000 ] = {0};
+		char vbuf[ 100000 ] = {0};
+		char fbuf[ 120000 ] = {0};
+	#endif
+
+		//I need to loop through the "block" and find each hash
+		yamlList **keys = find_keys_in_mt( tl, ky, &mtLen );
+	#if 0
+		while ( (*keys)->k ) {
+			fprintf( stderr, "%s - %s\n", (*keys)->k, (*keys)->v );
+			keys++;
+		}
+	#else
+	#endif
+
+		//Then loop through matched keys and values
+		while ( (*keys)->k ) {
+		#if 0
+			expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
+			expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
+			keys++;
+		#else
+			memcpy( &babuf[ baLen ], (*keys)->k, strlen( (*keys)->k ) ); 
+			baLen += strlen( (*keys)->k ); 
+
+			//Add actual words
+			memcpy( &vbuf[ vLen ], "\"", 1 );
+			memcpy( &vbuf[ vLen + 1 ], (*keys)->v, strlen( (*keys)->v ) ); 
+			vLen += strlen( (*keys)->v ) + 1;
+			memcpy( &vbuf[ vLen ], "\"", 1 );
+			vLen ++;
+
+			//Add a comma
+			memcpy( &babuf[ baLen ], ", ", 2 );
+			memcpy( &vbuf[ vLen ], ", ", 2 );
+			keys++, baLen+= 2, vLen+= 2; 
+		#endif
+		} 
+
+		//Create a SQL creation string, if any hashes were found.
+		if ( mtLen > 1 ) {
+		#if 0
+			babuf[ baLen-2 ]='\0', vbuf[ vLen-2 ]='\0';
+			snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
+			free( babuf );
+			free( vbuf );
+		#else
+			baLen -= 2, vLen -= 2;
+			babuf[ baLen ] = '\0';
+			vbuf[ vLen ] = '\0';
+			snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
+		#endif
+			fprintf( stdout, "%s\n", fbuf );
+		}
+
+		lt_free( tl );
+	}
 
 	//for ( ... ) free( hashlist );
 	//for ( ... ) free( pp.tlist );
