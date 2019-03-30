@@ -1505,6 +1505,7 @@ int main( int argc, char *argv[] ) {
 	char *ps[] = { NULL, NULL };
 	char **p = ps;
 	int len=0;
+	char *luaFile = NULL;
 
 	//Get source somewhere.
 	#if 0
@@ -1517,6 +1518,11 @@ int main( int argc, char *argv[] ) {
 	else
 	#endif
 	if ( opt_set( opts, "--file" ) ) {
+	#if 1
+		if ( !( luaFile = opt_get( opts, "--file" ).s) ) {
+			return err_print( 0, "%s", "No file specified." );	
+		}
+	#else
 		if ( !(sc = opt_get( opts, "--file" ).s) ) {
 			return err_print( 0, "%s", "No file specified." );	
 		}
@@ -1526,6 +1532,7 @@ int main( int argc, char *argv[] ) {
 		}
 
 		*p = (char *)b;
+	#endif
 	}
 	else if ( opt_set( opts, "--url" ) ) {
 		//sc = opt_get( opts, "--url" ).s;
@@ -1591,13 +1598,22 @@ int main( int argc, char *argv[] ) {
 	#endif
 #endif
 
+#if 0
 	//???
 	if ( !*p ) {
 		return err_print( 0, "No --file or --url specified.  Nothing to do." );
 	}
+#endif
+
+	//You probably need to stop here
+	if ( !luaFile ) {
+		return err_print( 0, "%s", "A Lua file must be specified for baht to work.." );
+	}
 
 	//Loop through things
+#if 0
 	while ( *p ) {	
+#endif
 		//Define all of that mess up here
 		int rootNode, jumpNode, activeNode;
 		uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
@@ -1611,7 +1627,7 @@ int main( int argc, char *argv[] ) {
 		//Initialize the file keys and parse a file here
 		Table *tYaml = malloc(sizeof(Table));
 		lt_init( tYaml, NULL, 127 );  
-		parse_lua( tYaml, "example.lua" );	
+		parse_lua( tYaml, luaFile );	
 		yamlList **ky = keys_from_ht( tYaml );
 
 		//Dump all found keys
@@ -1766,8 +1782,10 @@ int main( int argc, char *argv[] ) {
 			lt_free( tl );
 		}
 
+#if 0
 		p++;
 	}
+#endif
 
 	//for ( ... ) free( hashlist );
 	//for ( ... ) free( pp.tlist );
