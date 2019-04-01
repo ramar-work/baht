@@ -1478,6 +1478,7 @@ Option opts[] = {
  ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
  ,{ "-q", "--sql",           "Dump SQL"  }
 #endif
+ ,{ "-u", "--url",           "Check a URL from the WWW", 's' }
 
 	/*Dump options*/
  ,{ "-s", "--node-start",    "Use the tags from this YAML file", 'n' }
@@ -1485,7 +1486,7 @@ Option opts[] = {
  ,{ "-o", "--output",        "Send output to this file", 's' }
 
 	/*...*/
- ,{ "-p", "--parse",         "Parse file and stop", 's' }
+ ,{ "-p", "--parse",         "Parse file and stop" }
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -1538,35 +1539,40 @@ int main( int argc, char *argv[] ) {
 	
 	//Show a full key
 	optKeydump = opt_set( opts, "--show-full-key" ); 
-
-	//You probably need to stop here
-	if ( !luaFile ) {
-		return err_print( 0, "%s", "A Lua file must be specified for baht to work.." );
-	}
-#else
 #endif
 
 	//Define all of that mess up here
 	int rootNode, jumpNode, activeNode;
 	uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
-	char *fkey=NULL, *rkey=NULL;
+	char *fkey=NULL, *rkey=NULL, *pageUrl = NULL;
 	NodeSet *root=NULL, *jump=NULL;
+	Table *tHtml=NULL, *tYaml=NULL;
+	yamlList **ky = NULL;
 
-	//Initialize the table of final values here
-	Table *tHtml = malloc(sizeof(Table)); 
-	lt_init( tHtml, NULL, 33333 );  
+	//Initialize the table for HTML
+	tHtml = malloc(sizeof(Table)); 
+	lt_init( tHtml, NULL, 33333 );
 
-	//Initialize the file keys and parse a file here
-	Table *tYaml = malloc(sizeof(Table));
-	lt_init( tYaml, NULL, 127 );  
-	parse_lua( tYaml, luaFile );	
-	yamlList **ky = keys_from_ht( tYaml );
+	//If the user is just parsing, dump the parse and stop
+	if ( opt_set(opts,"--parse") && !luaFile ) {
+		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
+			return err_print( 0, "No URL specified for dump at '%s' failed.\n", pageUrl );
+		}
+	}
+	else {
+		//
+		tYaml = malloc(sizeof(Table));
+		lt_init( tYaml, NULL, 127 );  
+		parse_lua( tYaml, luaFile );	
+		ky = keys_from_ht( tYaml );
 
-	//Dump all found keys
-	//while ( (*keys) ) { printf( "%s\n", (*keys)->k ); keys++; }
+		//Set up HTML table and get ready to parse it
+		//Set the page URL and go retrieve it 
+		pageUrl = lt_text( tYaml, "page.url" );
+	}
 
-	//Set the page URL and go retrieve it 
-	char *pageUrl = lt_text( tYaml, "page.url" );
+
+	//Load the page from the web (or from file, but right now from web)
 	if ( !load_www( pageUrl, &b, &blen, &www ) ) {
 		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
 	}
@@ -1575,26 +1581,25 @@ int main( int argc, char *argv[] ) {
 	www.len = blen;
 	www.data = (uint8_t *)b;
 
-	//Set the root node and jump node
-	char *rootString = lt_text( tYaml, "root.origin" );
-	char *jumpString = lt_text( tYaml, "root.start" );
-	//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
-
 	//Create a hash table of all the HTML
-	//if ( !parse_html( tHtml, b, blen ) ) {
 	if ( !parse_html( tHtml, (char *)www.data, www.len ) ) {
 		return err_print( 0, "Couldn't parse HTML to hash Table:\n%s", *p );
 	}
 
-	//Stop at parsing
+	//If parsing only, stop here
 	if ( opt_set( opts, "--parse" ) ) {
 		lt_kdump( tHtml );
-		exit( 0 );
+		return 0;
 	}
 
 	//Set some references
+	char *rootString = lt_text( tYaml, "root.origin" );
+	char *jumpString = lt_text( tYaml, "root.start" );
 	root = &nodes[ 0 ].rootNode;
 	jump = &nodes[ 0 ].jumpNode;
+	//View root nodes and jump nodes...
+	//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
+
 
 	//Find the root node.
 	if ( ( rootNode = lt_geti( tHtml, rootString ) ) == -1 ) {

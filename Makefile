@@ -11,9 +11,13 @@ DBPASSWORD=
 SQLBIN=sqlcmd
 LDFLAGS=-lgumbo -llua -lgnutls -lcurl
 
-# go - Build the 'baht' scraper tool
+# top - Build the 'baht' scraper tool
+top: vendor/single.o
+	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME)
+
+# go - Run a typical query against a file
 go: vendor/single.o
-	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME) && ./$(NAME) -l files/carribeanmotors.lua
+	./$(NAME) -l files/carribeanmotors.lua
 
 # wop - Build the 'baht' scraper tool and run a dump 
 wop: vendor/single.o
