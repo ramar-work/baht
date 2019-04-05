@@ -81,10 +81,12 @@
 
 #define RERR(...) fprintf( stderr, __VA_ARGS__ ) ? 1 : 1 
 
+#define VPRINTF( ... ) ( verbose ) ? fprintf( stdout, __VA_ARGS__ ) : 0;
+
 #ifndef DEBUG
  #define DPRINTF( ... )
 #else
- #define DPRINTF( ... ) fprintf( stderr, __VA_ARGS__ )
+ #define DPRINTF( ... ) fprintf(stderr,"[%s: %d] ", __func__, __LINE__ ) && fprintf( stderr, __VA_ARGS__ )
 #endif
 
 #define ADD_ELEMENT( ptr, ptrListSize, eSize, element ) \
@@ -185,6 +187,14 @@ typedef struct completedRequest {
 } cRequest;
 
 
+enum pagetype {
+	PAGE_NONE
+, PAGE_URL
+, PAGE_FILE
+, PAGE_CMD
+};
+
+
 typedef struct nodeblock {
 	//The content to digest
 	//const uint8_t *html;
@@ -210,6 +220,9 @@ typedef struct nodeblock {
 
 //An error string buffer (useless)
 char _errbuf[2048] = {0};
+
+//Set verbosity globally until I get the time to restructure this app
+int verbose = 0;
 
 //User-Agent
 const char ua[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
@@ -266,6 +279,7 @@ int err_print ( int status, char *fmt, ... ) {
 
 //Debugging stuff.
 void print_innerproc( InnerProc *pi ) {
+	fprintf( stderr, "\nINNER PROC\n===========\n" );
 	fprintf( stderr, "parent:   %p\n", pi->parent );
 	fprintf( stderr, "rootNode: %d\n", pi->rootNode );
 	fprintf( stderr, "jumpNode: %d\n", pi->jumpNode );
@@ -277,7 +291,6 @@ void print_innerproc( InnerProc *pi ) {
 	fprintf( stderr, "hlistLen: %d\n", pi->hlistLen );
 	fprintf( stderr, "tlistLen: %d\n", pi->tlistLen );
 	fprintf( stderr, "hlist:    %p\n", pi->hlist );
-
 	fprintf( stderr, "srctable:   %p\n", pi->srctable );
 	fprintf( stderr, "ctable:     %p\n", pi->ctable );
 	fprintf( stderr, "checktable: %p\n", pi->checktable );
@@ -317,7 +330,7 @@ GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 
 
 //Load a page and write to buffer
-int load_page ( const char *file, char **dest, int *destlen ) {
+int load_page ( const char *file, char **dest, int *destlen, wwwResponse *w ) {
 
 	int fn, len=0;
 	struct stat sb;
@@ -341,34 +354,23 @@ int load_page ( const char *file, char **dest, int *destlen ) {
 		return err_set( 0, "%s", strerror( errno ) );
 	}
 
-	//Free the error message buffer
+	//Close the file?
+	if ( close( fn ) == -1 ) {
+		free( p );
+		return err_set( 0, "%s\n", strerror( errno ) );
+	}
+
+	//Set pointers 
 	*dest = p;
 	*destlen = sb.st_size;
+
+	//Set fake w
+	w->status = 200;
+	//w->len = *destlen;
+	//w->data = *dest;
+	w->redirect_uri = NULL;
 	return 1;
 }
-
-#if 0
-//Grab a URI and write to buffer
-int load_www ( const char *address, unsigned char **dest, int *destlen ) {
-	int fn;
-	struct stat sb;
-#if 0
-	//Can make a raw socket connection, but should use cURL for it...
-	//....
-	//connect( );
-	//I can use single for this... do a HEAD, then do a GET
-	//socket_connect( &sk (	
-
-	//Read the file into buffer	
-	if ( read( fn, dest, sb.st_size ) == -1 ) {
-		fprintf( stderr, "%s: %s\n", strerror( errno ) );
-		return 0; 
-	}
-#endif
-	*destlen = 0;
-	return 1;
-}
-#endif
 
 
 //Build table from yamlList
@@ -573,8 +575,9 @@ int create_frame ( LiteKv *kv, int i, void *p ) {
 			return 1;
 		}
 	#if 0
+		//This looks like it is building something
 		DPRINTF( "fk: %s\n", 
-			(char *)lt_get_full_key( pi->srctable, i, fkBuf, sizeof(fkBuf) - 1 ) );
+			(char *)lt_get_full_key( pi->srctable, i, (uint8_t *)fkBuf, sizeof(fkBuf) - 1 ) );
 		DPRINTF( "%d ? %ld\n", pi->keylen, strlen( (char *)fkBuf ) ); 
 	#endif
 		//Check strings and see if they match? (this is kind of a crude check)
@@ -699,30 +702,21 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 }
 
 
-//a dumb hacky way to do this is:
-//3keyvalue 
-//where 3 is the distance from the beginning of the string to find the value
-//obviously key is +1
 //why would I do this?  because it works here...
 int key_from_ht_exec ( LiteKv *kv, int i, void *p ) {
+	
 	struct why *w = (struct why *)p;
-	//yamlList **y = w->list; 
 	LiteType kt = kv->key.type, vt = kv->value.type;
-#if 0
-fprintf( stderr, "%d %p\n", w->len, y );
-fprintf( stderr, "%s,%s\n", lt_typename( kt ), lt_typename( vt ) );
-#endif
+
+	//DPRINTF( "%d %p\n", w->len, y );
+	//DPRINTF( "%s,%s\n", lt_typename( kt ), lt_typename( vt ) );
+
 	if ( kt == LITE_TXT && vt == LITE_TXT ) {
 		yamlList *tmp = malloc(sizeof(yamlList));
 		memset( tmp, 0, sizeof(yamlList));
 		tmp->k = kv->key.v.vchar; //add key
 		tmp->v = kv->value.v.vchar; //add value 
 		ADD_ELEMENT( w->list, w->len, sizeof( yamlList * ), tmp ); 
-#if 0
-for ( int x = 0; x<w->len; x++ ) {
-	fprintf( stderr, "%s\n", w->
-}
-#endif
 	}
 
 	if ( kt == LITE_TRM ) {
@@ -739,11 +733,14 @@ yamlList **keys_from_ht ( Table *t ) {
 	int h=0; 
 	//Find the elements key first
 	if (( h = lt_geti( t, "elements" )) == -1 ) {
+		VPRINTF( "Could not find 'elements' key in %s", "$LUA_FILE" );
 		return NULL;	
 	}
 
 	//Loop from this key if found.
-	lt_exec_complex( t, h, t->count, &w, key_from_ht_exec );
+	if ( !lt_exec_complex( t, h, t->count, &w, key_from_ht_exec ) ) {
+		VPRINTF( "Something failed..." );
+	}
 
 	#if 0
 	//TODO: What is the point of this?
@@ -918,18 +915,18 @@ void lua_dumptable ( lua_State *L, int *pos, int *sd ) {
 int parse_lua ( Table *t, const char *file ) {
 	lua_State *L = luaL_newstate(); 
 	if ( !L ) {
-		return 0;
+		return err_set( 0, "%s\n", "Lua failed to initialize." );
 	}
 	//
 	luaL_openlibs( L );
 	if ( luaL_dofile( L, file ) != 0 ) {
 		if ( lua_gettop( L ) > 0 ) {
-			fprintf( stderr, "error happened with Lua: %s\n", lua_tostring( L, 1 ) );
+			return err_set( 0, "error happened with Lua: %s\n", lua_tostring( L, 1 ) );
 		}
 	}
 	//
 	lua_to_table( L, 1, t );
-	lt_dump( t );
+	//lt_dump( t );
 	return 1;
 }
 
@@ -953,6 +950,7 @@ static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *u
 
 //Send requests to web pages.
 int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
+#if 0
 	int c=0, sec, port;
 	const char *fp = NULL;
 
@@ -1262,12 +1260,18 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 
 	}
 #endif
+end:
+	socket_close( &s );
+	gnutls_deinit( session );
+	gnutls_certificate_free_credentials( xcred );
+	gnutls_global_deinit();	
+#endif
 	return 1;
 }
 
 
 #if 0
-int load_www2 ( const char *p, char **dest, int *destlen ) {
+int loadwww2 ( const char *p, char **dest, int *destlen ) {
 	//Define all of this useful stuff
 	int err, ret, sd, ii, type, len;
 	unsigned int status;
@@ -1486,7 +1490,9 @@ Option opts[] = {
  ,{ "-o", "--output",        "Send output to this file", 's' }
 
 	/*...*/
- ,{ "-p", "--parse",         "Parse file and stop" }
+ ,{ NULL, "--see-parsed-html",  "Dump the parsed HTML and stop." }
+ ,{ NULL, "--see-parsed-lua",   "Dump the parsed Lua file and stop." }
+ ,{ NULL, "--see-parsed-xxx",   "Parse file and stop" }
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -1494,6 +1500,8 @@ Option opts[] = {
  ,{ NULL, "--pgsql",         "Choose PostgreSQL as the SQL template." }
  ,{ NULL, "--mssql",         "Choose SQL Server as the SQL template." }
 #endif
+ ,{ "-c", "--check",          "Check what is being loaded by Lua." }
+ ,{ "-v", "--verbose",        "Say more than usual" }
  ,{ "-h", "--help",           "Show help" }
  ,{ .sentinel = 1 }
 };
@@ -1528,7 +1536,18 @@ int main( int argc, char *argv[] ) {
 	char *luaFile = NULL;
 	wwwResponse www;
 
-#if 1
+	//Define all of that mess up here
+	int rootNode, jumpNode, activeNode;
+	uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
+	char *fkey=NULL, *rkey=NULL, *pageUrl = NULL;
+	NodeSet *root=NULL, *jump=NULL;
+	Table *tHtml=NULL, *tYaml=NULL;
+	yamlList **ky = NULL;
+	int pageType=0;
+
+	//Set verbosity
+	verbose = opt_set( opts, "--verbose" ); 
+
 	//Load a Lua file
 	if ( opt_set( opts, "--load" ) ) {
 		luaFile = opt_get( opts, "--load" ).s;
@@ -1539,43 +1558,63 @@ int main( int argc, char *argv[] ) {
 	
 	//Show a full key
 	optKeydump = opt_set( opts, "--show-full-key" ); 
-#endif
-
-	//Define all of that mess up here
-	int rootNode, jumpNode, activeNode;
-	uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
-	char *fkey=NULL, *rkey=NULL, *pageUrl = NULL;
-	NodeSet *root=NULL, *jump=NULL;
-	Table *tHtml=NULL, *tYaml=NULL;
-	yamlList **ky = NULL;
 
 	//Initialize the table for HTML
 	tHtml = malloc(sizeof(Table)); 
 	lt_init( tHtml, NULL, 33333 );
 
 	//If the user is just parsing, dump the parse and stop
-	if ( opt_set(opts,"--parse") && !luaFile ) {
+	if ( opt_set(opts,"--see-parsed-html") && !luaFile ) {
 		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
 			return err_print( 0, "No URL specified for dump at '%s' failed.\n", pageUrl );
 		}
 	}
 	else {
-		//
+		//Initialize something for Yaml/Lua
 		tYaml = malloc(sizeof(Table));
 		lt_init( tYaml, NULL, 127 );  
-		parse_lua( tYaml, luaFile );	
+
+		//
+		VPRINTF( "Loading and parsing Lua document at %s", luaFile );
+		if ( !parse_lua( tYaml, luaFile ) ) {
+			return err_print( 0, "%s", _errbuf  );
+		}
+
+		if ( opt_set( opts, "--see-parsed-lua" ) ) {
+			lt_kdump( tYaml );
+		}
+
 		ky = keys_from_ht( tYaml );
 
-		//Set up HTML table and get ready to parse it
-		//Set the page URL and go retrieve it 
-		pageUrl = lt_text( tYaml, "page.url" );
+#if 0
+		//The hash functions bring back duplicates.
+		if ( lt_text( tYaml, "page.url" ) != NULL )
+			pageUrl = lt_text( tYaml, "page.url" ), pageType = PAGE_URL;
+		else 
+#endif
+		if ( lt_text( tYaml, "page.file" ) != NULL )
+			pageUrl = lt_text( tYaml, "page.file" ), pageType = PAGE_FILE;
+		else if ( lt_text( tYaml, "page.command" ) != NULL ) {
+			pageUrl = lt_text( tYaml, "page.command" ), pageType = PAGE_CMD;
+		}
 	}
-
 
 	//Load the page from the web (or from file, but right now from web)
-	if ( !load_www( pageUrl, &b, &blen, &www ) ) {
+	if ( pageType == PAGE_URL && !load_www( pageUrl, &b, &blen, &www ) ) {
 		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
 	}
+
+	//Load the page from file
+	if ( pageType == PAGE_FILE && !load_page( pageUrl, &b, &blen, &www ) ) {
+		return err_print( 0, "Loading page '%s' failed.\n", pageUrl );
+	}
+
+#if 0
+	//Load the page from the web (or from file, but right now from web)
+	if ( !load_by_exec( pageUrl, &b, &blen, &www ) ) {
+		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
+	}
+#endif
 
 	//...
 	www.len = blen;
@@ -1587,7 +1626,7 @@ int main( int argc, char *argv[] ) {
 	}
 
 	//If parsing only, stop here
-	if ( opt_set( opts, "--parse" ) ) {
+	if ( opt_set( opts, "--see-parsed-html" ) ) {
 		lt_kdump( tHtml );
 		return 0;
 	}
@@ -1599,7 +1638,6 @@ int main( int argc, char *argv[] ) {
 	jump = &nodes[ 0 ].jumpNode;
 	//View root nodes and jump nodes...
 	//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
-
 
 	//Find the root node.
 	if ( ( rootNode = lt_geti( tHtml, rootString ) ) == -1 ) {
@@ -1620,10 +1658,19 @@ int main( int argc, char *argv[] ) {
 	fkey = (char *)lt_get_full_key( tHtml, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
 	rkey = (char *)lt_get_full_key( tHtml, rootNode, rkbuf, sizeof(rkbuf) - 1 );
 	SET_INNER_PROC( pp, tHtml, rootNode, jumpNode, fkey, rkey );
-	//print_innerproc( &pp );printf( "%s, %s\n", fkey, rkey );
+
+	#ifdef DEBUG
+	//Dump the processing structure ahead of processing 
+	print_innerproc( &pp );
+	#endif	
 
 	//Start the extraction process 
 	lt_exec( tHtml, &pp, create_frame );
+
+	#ifdef DEBUG
+	//Dump the processing structure after processing 
+	print_innerproc( &pp );
+	#endif	
 
 	//Build individual tables for each.
 	for ( int i=0; i<pp.hlistLen; i++ ) {
@@ -1648,6 +1695,12 @@ int main( int argc, char *argv[] ) {
 			lt_kdump( pp.ctable );
 		}
 	}
+
+	#ifdef DEBUG
+	//Dump the processing structure after processing 
+	print_innerproc( &pp );
+exit( 0 );
+	#endif	
 
 	//Destroy the source table. 
 	lt_free( tHtml );

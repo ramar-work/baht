@@ -11,13 +11,13 @@ DBPASSWORD=
 SQLBIN=sqlcmd
 LDFLAGS=-lgumbo -llua -lgnutls -lcurl
 
-# href - Build the 'baht' scraper tool
-href: vendor/single.o
-	$(CC) $(CFLAGS) -DIS_TEST vendor/single.o web.c -L. -lgnutls -lcurl -o ref 
-
 # top - Build the 'baht' scraper tool
 top: vendor/single.o
-	$(CC) $(CFLAGS) vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME)
+	$(CC) $(CFLAGS) -DDEBUG vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME)
+
+# href - Build baht's http handling code 
+href: vendor/single.o
+	$(CC) $(CFLAGS) -DIS_TEST vendor/single.o web.c -L. -lgnutls -lcurl -o ref 
 
 # go - Run a typical query against a file
 go: vendor/single.o
