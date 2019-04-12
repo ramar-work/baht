@@ -4,8 +4,7 @@
  * 
  * Summary
  * -------
- * A robot scraper thingy, which helps build the database 
- * for CheapWhips.net...
+ * A web scraper, which assists in building databases.
  * 
  * Usage
  * -----
@@ -20,6 +19,44 @@
  * ------
  * Antonio R. Collins II (ramar@tubularmodular.com, ramar.collins@gmail.com)
  * Copyright: Tubular Modular Feb 9th, 2019
+ *
+ * Description
+ * -----------
+ * Baht is a tool to help index websites.  It can download HTML, parse HTML,  * download images, follow redirects and much more.
+ *
+ * Example Usage is something like:
+ * <pre>
+ * $ baht -l <file> 
+ * </pre>
+ *
+ * If no file is present, a profile can be built on the command line like:
+ * <pre>
+ * $ baht [ -f <file>, -u <url> ] -e "{ model = '...', type = '...' }"
+ * </pre>
+ *
+ * Baht is a dumb robot, meaning that it you still have to tell it how to
+ * handle whatever is coming back from the server.  The easiest way is to
+ * write a Lua file defining which elements are most important on a page.
+ * 
+ * Baht works by using a string that resolves a certain part of the DOM, 
+ * and retrieving that node.  Here is an example of a car page that is
+ * indexed by an application I wrote:
+ * <pre> 
+root = {
+ origin= "div^backdrop.div^content_a.div^content_b.center"
+,start= "div^backdrop.div^content_a.div^content_b.center.div^thumb_div"
+,stop= "div^backdrop.div^content_a.div^content_b.center.br"
+}, 
+
+elements = {
+ model= "div^thumb_div.table^thumb_table_a.tbkdy.tr.td^thumb_ymm.text"
+, year= "$( get first word?  can use Lua or something )"
+, make= "$( get middle word )"
+	-- More data is listed but you get the idea.
+  ...  
+}
+ * </pre> 
+ *
  * 
  * TODO
  * ----
@@ -53,6 +90,13 @@
 #endif
 #define LT_DEVICE 1 
 
+#ifndef VERSION
+ #define VERSION "dev"
+#endif
+
+#define SHOW_COMPILE_DATE() \
+	fprintf( stderr, "baht v" VERSION " compiled: " __DATE__ ", " __TIME__ "\n" )
+
 #include "vendor/single.h"
 
 #include <curl/curl.h>
@@ -75,7 +119,7 @@
  #include <luaconf.h>
 #endif
 
-#define PROG "p"
+#define PROG "baht"
 
 #define INCLUDE_TESTS
 
@@ -1523,6 +1567,9 @@ struct Cmd {
 
 //Much like moving through any other parser...
 int main( int argc, char *argv[] ) {
+
+	//Show the version and compilation date
+	SHOW_COMPILE_DATE();
 
 	//Process some options
 	(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);

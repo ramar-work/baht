@@ -1,8 +1,9 @@
 # Makefile for this stupid script
 CC=gcc
-CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 #-DERRV_H
+VERSION=0.01
+CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" #-DERRV_H
 CC=clang
-CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 #-DERRV_H
+CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" #-DERRV_H
 NAME=baht
 DBSERVER="localhost"
 DATABASE=ctrial_db
@@ -10,6 +11,7 @@ DBUSER=
 DBPASSWORD=
 SQLBIN=sqlcmd
 LDFLAGS=-lgumbo -llua -lgnutls -lcurl
+PREFIX=/usr/local
 
 # top - Build the 'baht' scraper tool
 top: vendor/single.o
@@ -67,3 +69,11 @@ mysql-load:
 # listings - Make a database of listings
 listings:
 	printf ''
+
+
+# install - Install the tool somewhere
+install:
+	test -d $(PREFIX)/bin/ || mkdir -p $(PREFIX)/bin/
+	cp -v $(NAME) $(PREFIX)/bin/	
+
+
