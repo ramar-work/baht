@@ -576,20 +576,32 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 
 
 //Put the raw HTML into a hash table 
-int parse_html ( Table *tt, char *b, int len ) {
+Table *parse_html ( char *b, int len ) {
+
+	Table *tt = NULL;
 
 	//We can loop through the Gumbo data structure and create a node list that way
 	GumboOutput *output = gumbo_parse_with_options( &kGumboDefaultOptions, (char *)b, len );
 	GumboVector *children = &(output->root)->v.element.children;
 	GumboNode *body = find_tag( output->root, GUMBO_TAG_BODY );
 
+	//Allocate a table
+	if ( !(tt = malloc(sizeof(Table))) ) {
+		err_set( 0, "%s", "could not allocate HTML source table!" );
+		return NULL;
+	}
+
 	//Stop with blank bodies
-	if ( !body )
-		return err_set( 0, "%s", "no <body> tag found!" );
+	if ( !body ) {
+		err_set( 0, "%s", "no <body> tag found!" );
+		return NULL;
+	}
 
 	//Allocate a Table
-	if ( !lt_init( tt, NULL, 33300 ) )
-		return err_set( 0, "%s", "couldn't allocate table!" ); 	
+	if ( !lt_init( tt, NULL, 33300 ) ) {
+		err_set( 0, "%s", "couldn't allocate table!" ); 	
+		return NULL;
+	}
 
 	//Parse the document into a Table
 	int elements = gumbo_to_table( body, tt );
@@ -601,7 +613,7 @@ int parse_html ( Table *tt, char *b, int len ) {
 
 	//Free the gumbo struture 
 	gumbo_destroy_output( &kGumboDefaultOptions, output );
-	return 1;
+	return tt;
 
 }
 
@@ -959,22 +971,40 @@ void lua_dumptable ( lua_State *L, int *pos, int *sd ) {
 
 
 //parse_lua
-int parse_lua ( Table *t, const char *file ) {
-	lua_State *L = luaL_newstate(); 
-	if ( !L ) {
-		return err_set( 0, "%s\n", "Lua failed to initialize." );
+Table *parse_lua ( const char *file ) {
+	Table *tt = NULL;
+	lua_State *L = NULL;
+
+	//Initialize something for Lua
+	if ( !( tt = malloc(sizeof(Table))) ) {
+		return NULL;
 	}
-	//
+
+	//This can fail too
+	if ( !lt_init( tt, NULL, 127 ) ) {
+		return NULL;
+	}
+
+	//Catch Lua environment allocation failures.
+	if ( !(L = luaL_newstate()) ) {
+		err_set( 0, "%s\n", "Lua failed to initialize." );
+		return NULL;
+	}
+
+	//And check for load errors.
 	luaL_openlibs( L );
 	if ( luaL_dofile( L, file ) != 0 ) {
 		if ( lua_gettop( L ) > 0 ) {
-			return err_set( 0, "error happened with Lua: %s\n", lua_tostring( L, 1 ) );
+			err_set( 0, "error happened with Lua: %s\n", lua_tostring( L, 1 ) );
+			return NULL;
 		}
 	}
-	//
-	lua_to_table( L, 1, t );
+
+	//Convert to Table
+	lua_to_table( L, 1, tt );
 	//lt_dump( t );
-	return 1;
+
+	return tt;
 }
 
 
@@ -1609,9 +1639,6 @@ int main( int argc, char *argv[] ) {
 	//Show a full key
 	optKeydump = opt_set( opts, "--show-full-key" ); 
 
-	//Initialize the table for HTML
-	tHtml = malloc(sizeof(Table)); 
-
 	//If the user is just parsing, dump the parse and stop
 	if ( opt_set(opts,"--see-parsed-html") && !luaFile ) {
 
@@ -1632,20 +1659,20 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 	else {
-		//Initialize something for Yaml/Lua
-		tYaml = malloc(sizeof(Table));
-		lt_init( tYaml, NULL, 127 );  
-
 		//
 		VPRINTF( "Loading and parsing Lua document at %s", luaFile );
-		if ( !parse_lua( tYaml, luaFile ) ) {
+		if ( !(tYaml = parse_lua( luaFile )) ) {
 			return err_print( 0, "%s", _errbuf  );
 		}
 
 		if ( opt_set( opts, "--see-parsed-lua" ) ) {
 			lt_kdump( tYaml );
+			lt_free( tYaml );
+			free( tYaml );
+			return 0;
 		}
 
+		//Shouldn't I catch this?
 		ky = keys_from_ht( tYaml );
 
 #if 0
@@ -1683,8 +1710,8 @@ int main( int argc, char *argv[] ) {
 	//www.data = (uint8_t *)b;
 
 	//Create a hash table of all the HTML
-	if ( !parse_html( tHtml, (char *)www.data, www.len ) ) {
-		return err_print( 0, "Couldn't parse HTML to hash Table:\n%s", *p );
+	if ( !(tHtml = parse_html( (char *)www.data, www.len )) ) {
+		return err_print( 0, "Couldn't parse HTML to hash Table" );
 	}
 
 	//If parsing only, stop here
