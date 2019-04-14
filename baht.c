@@ -14,6 +14,7 @@
  * -----
  * -DDEBUG - Show debugging information 
  * -DHASHTYPE_* - Compile with different hash schemes? 
+ * -DSEE_FRAMING * - Compile with the ability to see dumps of hashes
  * 
  * Author
  * ------
@@ -125,7 +126,7 @@ elements = {
 
 #define RERR(...) fprintf( stderr, __VA_ARGS__ ) ? 1 : 1 
 
-#define VPRINTF( ... ) ( verbose ) ? fprintf( stdout, __VA_ARGS__ ) : 0;
+#define VPRINTF( ... ) ( verbose ) ? fprintf( stderr, __VA_ARGS__ ) : 0; fflush(stderr);
 
 #ifndef DEBUG
  #define DPRINTF( ... )
@@ -166,19 +167,31 @@ typedef struct { char *k, *v; } yamlList;
 
 
 //...
-typedef struct useless_structure {
+typedef struct {
 	LiteKv *parent;
-	Table *srctable;
+
+#if 0
+	struct quad { char *src, *complete; int node, len; } rootj;
+	struct quad { char *src, *complete; int node, len; } jumpj;
+#else
+	char * rootString;
+	char * jumpString;
+	char *key;
+	char *rkey;
+#endif
+
+
 	int rootNode;
 	int jumpNode;
 	int jump;
 	int level;
-	char *key;
-	char *rkey;
+
 	int keylen;
 	int hlistLen;
 	int *hlist;
 	int tlistLen;
+
+	Table *srctable;
 	Table **tlist;
 	Table *ctable;
 	Table *checktable;
@@ -619,7 +632,8 @@ Table *parse_html ( char *b, int len ) {
 
 
 //Pull the framing stuff
-int create_frame ( LiteKv *kv, int i, void *p ) {
+//NOTE: "Frames" can be automatically generated if the markup lends itself to it.
+int create_frames ( LiteKv *kv, int i, void *p ) {
 	//A data structure can take both of these...
 	InnerProc *pi = (InnerProc *)p;
 	#if 0
@@ -792,13 +806,13 @@ yamlList **keys_from_ht ( Table *t ) {
 	int h=0; 
 	//Find the elements key first
 	if (( h = lt_geti( t, "elements" )) == -1 ) {
-		VPRINTF( "Could not find 'elements' key in %s", "$LUA_FILE" );
+		VPRINTF( "Could not find 'elements' key in %s\n", "$LUA_FILE" );
 		return NULL;	
 	}
 
 	//Loop from this key if found.
 	if ( !lt_exec_complex( t, h, t->count, &w, key_from_ht_exec ) ) {
-		VPRINTF( "Something failed..." );
+		VPRINTF( "Something failed...\n" );
 	}
 
 	#if 0
@@ -1554,22 +1568,20 @@ Option opts[] = {
   { "-l", "--load",          "Load a file on the command line.", 's' }
  ,{ "-k", "--show-full-key", "Show a full key"  }
  ,{ "-f", "--file",          "Get a file on the command line.", 's' }
-#if 0
- ,{ "-u", "--url",           "Get something from the WWW", 's' }
- ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
- ,{ "-q", "--sql",           "Dump SQL"  }
-#endif
  ,{ "-u", "--url",           "Check a URL from the WWW", 's' }
 
 	/*Dump options*/
- ,{ "-s", "--node-start",    "Use the tags from this YAML file", 'n' }
- ,{ "-e", "--node-end",      "Use the tags from this YAML file", 'n' }
+ ,{ "-s", "--rootstart",    "Define the root start node", 's' }
+ ,{ "-e", "--jumpstart",      "Define the root end node", 's' }
  ,{ "-o", "--output",        "Send output to this file", 's' }
 
 	/*...*/
+#ifdef SEE_FRAMING 
  ,{ NULL, "--see-parsed-html",  "Dump the parsed HTML and stop." }
  ,{ NULL, "--see-parsed-lua",   "Dump the parsed Lua file and stop." }
- ,{ NULL, "--see-parsed-xxx",   "Parse file and stop" }
+ ,{ NULL, "--see-frames",       "Show the frames" }
+ ,{ NULL, "--step",             "Step through frames" }
+#endif
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -1615,12 +1627,13 @@ int main( int argc, char *argv[] ) {
 	int blen=0;
 	char *luaFile = NULL;
 	wwwResponse www;
+	InnerProc pp = { 0 };
 
 	//Define all of that mess up here
-	int rootNode, jumpNode, activeNode;
+//	int rootNode, jumpNode, activeNode;
+//	NodeSet *root=NULL, *jump=NULL;
 	uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
 	char *fkey=NULL, *rkey=NULL, *pageUrl = NULL;
-	NodeSet *root=NULL, *jump=NULL;
 	Table *tHtml=NULL, *tYaml=NULL;
 	yamlList **ky = NULL;
 	int pageType=0;
@@ -1640,16 +1653,19 @@ int main( int argc, char *argv[] ) {
 	optKeydump = opt_set( opts, "--show-full-key" ); 
 
 	//If the user is just parsing, dump the parse and stop
-	if ( opt_set(opts,"--see-parsed-html") && !luaFile ) {
+	if ( !luaFile /*&& opt_set(opts,"--see-parsed-html")*/ ) {
+		char *wd =NULL;
 
 		if ( opt_set( opts, "--url" ) ) {
 			pageType = PAGE_URL;
+			wd = "URL:";
 			if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
 				return err_print( 0, "No URL specified for dump." ); 
 			}
 		}
 		else if ( opt_set( opts, "--file" ) ) {
 			pageType = PAGE_FILE;
+			wd = "HTML document at";
 			if ( !(pageUrl = opt_get( opts, "--file" ).s) ) {
 				return err_print( 0, "No file specified for dump." ); 
 			}
@@ -1657,20 +1673,24 @@ int main( int argc, char *argv[] ) {
 		else {
 			return err_print( 0, "--see-parsed-html specified but no source given (try --file, --url or --load flags).\n" );
 		}
+
+		VPRINTF( "Loading and parsing %s '%s'\n", wd, pageUrl );
 	}
 	else {
 		//
-		VPRINTF( "Loading and parsing Lua document at %s", luaFile );
+		VPRINTF( "Loading and parsing Lua document at %s\n", luaFile );
 		if ( !(tYaml = parse_lua( luaFile )) ) {
 			return err_print( 0, "%s", _errbuf  );
 		}
 
+	#ifdef SEE_FRAMING
 		if ( opt_set( opts, "--see-parsed-lua" ) ) {
 			lt_kdump( tYaml );
 			lt_free( tYaml );
 			free( tYaml );
 			return 0;
 		}
+	#endif
 
 		//Shouldn't I catch this?
 		ky = keys_from_ht( tYaml );
@@ -1714,6 +1734,7 @@ int main( int argc, char *argv[] ) {
 		return err_print( 0, "Couldn't parse HTML to hash Table" );
 	}
 
+#ifdef SEE_FRAMING
 	//If parsing only, stop here
 	if ( opt_set( opts, "--see-parsed-html" ) ) {
 		lt_kdump( tHtml );
@@ -1724,47 +1745,73 @@ int main( int argc, char *argv[] ) {
 		free( tHtml );
 		return 0;
 	}
+#endif
 
-	//Set some references
-	char *rootString = lt_text( tYaml, "root.origin" );
-	char *jumpString = lt_text( tYaml, "root.start" );
-	root = &nodes[ 0 ].rootNode;
-	jump = &nodes[ 0 ].jumpNode;
-	//View root nodes and jump nodes...
-	//printf( "%s, %s\n", rootString, jumpString ); exit( 0 );
+	//Load Lua hashes first, if overriding, use those options
+	if ( tYaml ) {
+		pp.rootString = lt_text( tYaml, "root.origin" ),
+		pp.jumpString = lt_text( tYaml, "root.start" );
+	}
+
+	if ( opt_set( opts, "--rootstart" ) ) {
+		pp.rootString = opt_get( opts, "--rootstart" ).s; 
+	}
+
+	if ( opt_set( opts, "--jumpstart" ) ) {
+		pp.jumpString = opt_get( opts, "--jumpstart" ).s; 
+	}
 
 	//Find the root node.
-	if ( ( rootNode = lt_geti( tHtml, rootString ) ) == -1 ) {
-		return err_print( 0, "string '%s' not found.\n", rootString );
+	if ( ( pp.rootNode = lt_geti( tHtml, pp.rootString ) ) == -1 ) {
+		return err_print( 0, "string '%s' not found.\n", pp.rootString );
 	}
 
 	//Find the "jump" node.
-	if ( !jumpString ) 
-		jumpNode = rootNode;
+	if ( !pp.jumpString ) 
+		pp.jumpNode = pp.rootNode;
 	else {
-		if ( ( jumpNode = lt_geti( tHtml, jumpString ) ) == -1 ) {
-			return err_print( 0, "jump string '%s' not found.\n", jumpString );
+		if ( (pp.jumpNode = lt_geti( tHtml, pp.jumpString) ) == -1 ) {
+			return err_print( 0, "jump string '%s' not found.\n", pp.jumpString );
 		}
 	}
-	//printf( "%d, %d\n", rootNode, jumpNode ); exit( 0 );
 
-	//Get parent and do work.
-	fkey = (char *)lt_get_full_key( tHtml, jumpNode, fkbuf, sizeof(fkbuf) - 1 );
-	rkey = (char *)lt_get_full_key( tHtml, rootNode, rkbuf, sizeof(rkbuf) - 1 );
+#if 0
 	SET_INNER_PROC( pp, tHtml, rootNode, jumpNode, fkey, rkey );
+#else
+	//Sorry :(  This is ass-ugly..
+	pp.parent = lt_retkv( tHtml, pp.rootNode );
+	pp.srctable = tHtml;
+	//pp.jump = pp.jumpNode;
+	pp.key  = (char *)lt_get_full_key( tHtml, pp.jumpNode, fkbuf, sizeof(fkbuf) - 1 );
+	pp.rkey  = (char *)lt_get_full_key( tHtml, pp.rootNode, rkbuf, sizeof(rkbuf) - 1 );
+	pp.keylen = strlen( pp.key );
+	//We really shouldn't need this, I initialize to zero somewhere at the top of main()
+	pp.level = 0;
+	pp.tlist = NULL;
+	pp.tlistLen = 0;
+	pp.hlist = NULL;
+	pp.hlistLen = 0;
+	pp.checktable = NULL;
+#endif
 
-	#ifdef DEBUG
+#ifdef DEBUG
 	//Dump the processing structure ahead of processing 
 	print_innerproc( &pp );
-	#endif	
+#endif	
 
 	//Start the extraction process 
-	lt_exec( tHtml, &pp, create_frame );
+	lt_exec( tHtml, &pp, create_frames );
 
-	#ifdef DEBUG
+#ifdef DEBUG
 	//Dump the processing structure after processing 
 	print_innerproc( &pp );
-	#endif	
+	exit(0);
+#endif	
+
+	//If hlistLen is zero, we didn't find the frames...
+	if ( !pp.hlistLen ) {
+		return err_print( 1, "%s\n", "No frame nodes found!" );	
+	}
 
 	//Build individual tables for each.
 	for ( int i=0; i<pp.hlistLen; i++ ) {

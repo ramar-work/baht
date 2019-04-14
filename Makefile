@@ -3,7 +3,7 @@ CC=gcc
 VERSION=0.01
 CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" #-DERRV_H
 CC=clang
-CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" #-DERRV_H
+CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" -DSEE_FRAMING #-DERRV_H
 NAME=baht
 DBSERVER="localhost"
 DATABASE=ctrial_db
