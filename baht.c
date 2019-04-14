@@ -404,14 +404,17 @@ int load_page ( const char *file, char **dest, int *destlen, wwwResponse *w ) {
 		return err_set( 0, "%s\n", strerror( errno ) );
 	}
 
-	//Set pointers 
-	*dest = p;
-	*destlen = sb.st_size;
-
 	//Set fake w
 	w->status = 200;
-	//w->len = *destlen;
-	//w->data = *dest;
+#if 0
+	*dest = p;
+	*destlen = sb.st_size;
+	w->len = *destlen;
+	w->data = (uint8_t *)*dest;
+#else
+	w->len = sb.st_size;
+	w->data = (uint8_t *)p;
+#endif
 	w->redirect_uri = NULL;
 	return 1;
 }
@@ -1520,8 +1523,8 @@ Option opts[] = {
 	//Things on things
   { "-l", "--load",          "Load a file on the command line.", 's' }
  ,{ "-k", "--show-full-key", "Show a full key"  }
-#if 0
  ,{ "-f", "--file",          "Get a file on the command line.", 's' }
+#if 0
  ,{ "-u", "--url",           "Get something from the WWW", 's' }
  ,{ "-y", "--yaml",          "Use the tags from this YAML file", 's' }
  ,{ "-q", "--sql",           "Dump SQL"  }
@@ -1608,12 +1611,24 @@ int main( int argc, char *argv[] ) {
 
 	//Initialize the table for HTML
 	tHtml = malloc(sizeof(Table)); 
-	lt_init( tHtml, NULL, 33333 );
 
 	//If the user is just parsing, dump the parse and stop
 	if ( opt_set(opts,"--see-parsed-html") && !luaFile ) {
-		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
-			return err_print( 0, "No URL specified for dump at '%s' failed.\n", pageUrl );
+
+		if ( opt_set( opts, "--url" ) ) {
+			pageType = PAGE_URL;
+			if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
+				return err_print( 0, "No URL specified for dump." ); 
+			}
+		}
+		else if ( opt_set( opts, "--file" ) ) {
+			pageType = PAGE_FILE;
+			if ( !(pageUrl = opt_get( opts, "--file" ).s) ) {
+				return err_print( 0, "No file specified for dump." ); 
+			}
+		}
+		else {
+			return err_print( 0, "--see-parsed-html specified but no source given (try --file, --url or --load flags).\n" );
 		}
 	}
 	else {
@@ -1657,15 +1672,15 @@ int main( int argc, char *argv[] ) {
 	}
 
 #if 0
-	//Load the page from the web (or from file, but right now from web)
+	//Load the page via a command 
 	if ( !load_by_exec( pageUrl, &b, &blen, &www ) ) {
 		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
 	}
 #endif
 
-	//...
-	www.len = blen;
-	www.data = (uint8_t *)b;
+	//Set length and content buffer
+	//www.len = blen;
+	//www.data = (uint8_t *)b;
 
 	//Create a hash table of all the HTML
 	if ( !parse_html( tHtml, (char *)www.data, www.len ) ) {
@@ -1675,6 +1690,11 @@ int main( int argc, char *argv[] ) {
 	//If parsing only, stop here
 	if ( opt_set( opts, "--see-parsed-html" ) ) {
 		lt_kdump( tHtml );
+
+		//During testing, I didn't need to free anything.
+		lt_free( tHtml );
+		free( www.data );
+		free( tHtml );
 		return 0;
 	}
 
