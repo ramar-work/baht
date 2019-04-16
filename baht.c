@@ -80,30 +80,15 @@ elements = {
    something goes wrong)
 
  * ---------------------------------------------- */
-#if 0 
-#include <stdio.h> 
-#include <unistd.h> 
-#include <errno.h> 
-#include <sys/stat.h> 
-#include <sys/types.h> 
-#include <fcntl.h> 
-#include <string.h> 
-#endif
-#define LT_DEVICE 1 
-
-#ifndef VERSION
- #define VERSION "dev"
-#endif
-
-#define SHOW_COMPILE_DATE() \
-	fprintf( stderr, "baht v" VERSION " compiled: " __DATE__ ", " __TIME__ "\n" )
-
 #include "vendor/single.h"
-
-#include <curl/curl.h>
-
 #include <gnutls/gnutls.h>
 #include <gumbo.h>
+//TODO: These headers should no longer exist in a future version
+#include <curl/curl.h>
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+#include <luaconf.h>
 
 #ifndef DEBUG
  #define RUN(c) (c)
@@ -112,27 +97,22 @@ elements = {
  (c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
 #endif
 
-#if 0
-#else
- #include <lua.h>
- #include <lualib.h>
- #include <lauxlib.h>
- #include <luaconf.h>
-#endif
+#define LT_DEVICE 1 
 
 #define PROG "baht"
 
 #define INCLUDE_TESTS
 
+#define KEYBUFLEN 2048
+
+#define ROOT_NODE "page.root"
+
 #define RERR(...) fprintf( stderr, __VA_ARGS__ ) ? 1 : 1 
 
 #define VPRINTF( ... ) ( verbose ) ? fprintf( stderr, __VA_ARGS__ ) : 0; fflush(stderr);
 
-#ifndef DEBUG
- #define DPRINTF( ... )
-#else
- #define DPRINTF( ... ) fprintf(stderr,"[%s: %d] ", __func__, __LINE__ ) && fprintf( stderr, __VA_ARGS__ )
-#endif
+#define SHOW_COMPILE_DATE() \
+	fprintf( stderr, "baht v" VERSION " compiled: " __DATE__ ", " __TIME__ "\n" )
 
 #define ADD_ELEMENT( ptr, ptrListSize, eSize, element ) \
 	if ( ptr ) \
@@ -143,66 +123,39 @@ elements = {
 	*(&ptr[ ptrListSize ]) = element; \
 	ptrListSize++;
 
-#define SET_INNER_PROC(p, t, rn, jn, fk, rk) \
-	InnerProc p = { \
-		.parent   = lt_retkv( t, rn ) \
-	 ,.srctable = t \
-	 ,.jump = jn \
-	 ,.key  = fk \
-	 ,.rkey  = rk \
-	 ,.level = 0 \
-	 ,.keylen = strlen( fk ) \
-	 ,.tlist = NULL \
-	 ,.tlistLen = 0 \
-	 ,.hlist = NULL \
-	 ,.hlistLen = 0 \
-	 ,.checktable = NULL \
-	}
+#ifndef VERSION
+ #define VERSION "dev"
+#endif
 
-#define ROOT_NODE "page.root"
-
-
-/*Data types*/
-typedef struct { char *k, *v; } yamlList;
-
-
-//...
-typedef struct {
-	LiteKv *parent;
-
-#if 0
-	struct quad { char *src, *complete; int node, len; } rootj;
-	struct quad { char *src, *complete; int node, len; } jumpj;
+#ifndef DEBUG
+ #define DPRINTF( ... )
 #else
-	char * rootString;
-	char * jumpString;
-	char *key;
-	char *rkey;
+ #define DPRINTF( ... ) fprintf(stderr,"[%s: %d] ", __func__, __LINE__ ) && fprintf( stderr, __VA_ARGS__ )
 #endif
 
 
-	int rootNode;
-	int jumpNode;
-	int jump;
-	int level;
+//Data types
+typedef struct { char *k, *v; } yamlList;
 
-	int keylen;
-	int hlistLen;
+typedef struct { char *fragment, *complete; int node, len; } Quad;
+
+//TODO: How do I document this?
+typedef struct {
+	Quad root, jump; 
+	char *framestart, *framestop; //These are just fragments
+	int hlistLen, tlistLen;
 	int *hlist;
-	int tlistLen;
-
+	LiteKv *parent;
 	Table *srctable;
-	Table **tlist;
 	Table *ctable;
 	Table *checktable;
+	Table **tlist;
 } InnerProc;
-
 
 typedef struct stretchBuffer {
 	int len;
 	uint8_t *buf;
 } Sbuffer;
-
 
 //Approximate where something is, by checking the similarity of its parent
 typedef struct simp { 
@@ -224,24 +177,13 @@ typedef struct wwwResponse {
 	int status, len;
 	uint8_t *data;
 	char *redirect_uri;
-//char *uri;
-} wwwResponse;
-
-typedef struct nodeset {
-	int hash;             //Stored hash
-	const char *key;      //Key that the value corresponds to
-	const char *string;   //String
-} NodeSet;
-
-
-//
-typedef struct completedRequest {
+#if 0
 	const char *url;
 	const char *strippedHttps;
 	const char *statusLine;
 	const char *path;
-	int status;
-} cRequest;
+#endif
+} wwwResponse;
 
 
 enum pagetype {
@@ -251,35 +193,15 @@ enum pagetype {
 , PAGE_CMD
 };
 
-
-typedef struct nodeblock {
-	//The content to digest
-	//const uint8_t *html;
-
-	//The "root element" that encompasses the elements we want to loop through
-	NodeSet rootNode;
-
-	//A possible node to jump to
-	NodeSet jumpNode;
-
-	//A set of elements containing entries
-	NodeSet *loopNodes;
-
-	//Set of tables (each of the nodes, copied)
-	Table *tlist;
-} Nodeblock;
-
-
-#ifdef INCLUDE_TESTS 
- #include "test.c"
-#endif
-
-
 //An error string buffer (useless)
 char _errbuf[2048] = {0};
 
 //Set verbosity globally until I get the time to restructure this app
 int verbose = 0;
+
+//Global error handler in place of exceptions or a better thought error handler.  
+//TODO: Obviously, multi-threading is not going to be very kind to this app.  Change this ASAP. 
+int died=0;
 
 //User-Agent
 const char ua[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
@@ -298,11 +220,9 @@ const char *gumbo_types[] = {
 , "template"
 };
 
-
 const char *errMessages[] = {
 	NULL
 };
-
 
 //Return the type name of a node
 const char *print_gumbo_type ( GumboNodeType t ) {
@@ -322,6 +242,7 @@ int err_set ( int status, char *fmt, ... ) {
 
 //Use this to return from main()
 int err_print ( int status, char *fmt, ... ) {
+	died = 1;
 	fprintf( stderr, PROG ": " );
 	va_list ap;
 	va_start( ap, fmt ); 
@@ -336,15 +257,21 @@ int err_print ( int status, char *fmt, ... ) {
 
 //Debugging stuff.
 void print_innerproc( InnerProc *pi ) {
-	fprintf( stderr, "\nINNER PROC\n===========\n" );
+#ifndef DEBUG
+	0;
+#else
+	fprintf( stderr, "\n\n===========\n" );
 	fprintf( stderr, "parent:   %p\n", pi->parent );
-	fprintf( stderr, "rootNode: %d\n", pi->rootNode );
-	fprintf( stderr, "jumpNode: %d\n", pi->jumpNode );
-	fprintf( stderr, "jump:     %d\n", pi->jump );
-	fprintf( stderr, "level:    %d\n", pi->level );
-	fprintf( stderr, "key:      %s\n", pi->key );
-	fprintf( stderr, "rkey:     %s\n", pi->rkey );
-	fprintf( stderr, "keylen:   %d\n", pi->keylen );
+	fprintf( stderr, "root fragment: %s\n", pi->root.fragment ); 
+	fprintf( stderr, "root complete: %s\n", pi->root.complete ); 
+	fprintf( stderr, "root node: %d\n", pi->root.node ); 
+	fprintf( stderr, "root len: %d\n", pi->root.len ); 
+	fprintf( stderr, "jump fragment: %s\n", pi->jump.fragment ); 
+	fprintf( stderr, "jump complete: %s\n", pi->jump.complete ); 
+	fprintf( stderr, "jump node: %d\n", pi->jump.node ); 
+	fprintf( stderr, "jump len: %d\n", pi->jump.len ); 
+	fprintf( stderr, "\n" );
+
 	fprintf( stderr, "hlistLen: %d\n", pi->hlistLen );
 	fprintf( stderr, "tlistLen: %d\n", pi->tlistLen );
 	fprintf( stderr, "hlist:    %p\n", pi->hlist );
@@ -352,6 +279,7 @@ void print_innerproc( InnerProc *pi ) {
 	fprintf( stderr, "ctable:     %p\n", pi->ctable );
 	fprintf( stderr, "checktable: %p\n", pi->checktable );
 	fprintf( stderr, "tlist:      %p\n", pi->tlist );
+#endif
 }
 
 
@@ -641,7 +569,7 @@ int create_frames ( LiteKv *kv, int i, void *p ) {
 	#endif
 
 	//Check that parents are the same... 
-	if ( kv->parent && (kv->parent == pi->parent) && (i >= pi->jump) ) {
+	if ( kv->parent && (kv->parent == pi->parent) && (i >= pi->jump.node ) ) {
 		//...and that the full hash matches the key.
 		char fkBuf[ 2048 ] = {0};
 		if ( !lt_get_full_key(pi->srctable, i, (uint8_t *)fkBuf, sizeof(fkBuf)-1) ) {
@@ -654,7 +582,7 @@ int create_frames ( LiteKv *kv, int i, void *p ) {
 		DPRINTF( "%d ? %ld\n", pi->keylen, strlen( (char *)fkBuf ) ); 
 	#endif
 		//Check strings and see if they match? (this is kind of a crude check)
-		if ( pi->keylen == strlen(fkBuf) && memcmp(pi->key, fkBuf, pi->keylen) == 0 ) {
+		if ( pi->jump.len == strlen(fkBuf) && memcmp(pi->jump.complete, fkBuf, pi->jump.len ) == 0 ) {
 			//save hash here and realloc a stretching int buffer...
 			ADD_ELEMENT( pi->hlist, pi->hlistLen, int, i );
 		}
@@ -737,9 +665,9 @@ int build_ctck ( Table *tt, int start, int end ) {
 	return 1;
 }
 
-
 //Pass through and build a smaller subset of tables
 int build_individual ( LiteKv *kv, int i, void *p ) {
+
 	//Set refs
 	InnerProc *pi = (InnerProc *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
@@ -752,7 +680,7 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	else if ( kt == LITE_TXT )
 		lt_addtextkey( pi->ctable, kv->key.v.vchar );	
 	else if ( kt == LITE_TRM ) {
-		pi->level --;
+		//(*pi->level) --;
 		lt_ascend( pi->ctable );
 		return 1;
 	}
@@ -765,11 +693,12 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	else if ( vt == LITE_TXT )
 		lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
 	else if ( vt == LITE_TBL ) {
-		pi->level ++;
+		//(*pi->level) ++;
 		//fprintf( stderr, "%p\n", &kv->value.v.vtable );
 		lt_descend( pi->ctable );
 		return 1;
 	}
+
 	lt_finalize( pi->ctable );
 	return 1;
 }
@@ -830,7 +759,7 @@ yamlList **keys_from_ht ( Table *t ) {
 
 //
 yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
-//lt_kdump( t );
+
 	yamlList **sql = NULL;
 	int h=0, sqlLen = 0;
 	while ( (*tn) ) {
@@ -1564,24 +1493,29 @@ const char sqlfmt[] =
 
 //Option
 Option opts[] = {
-	//Things on things
-  { "-l", "--load",          "Load a file on the command line.", 's' }
- ,{ "-k", "--show-full-key", "Show a full key"  }
- ,{ "-f", "--file",          "Get a file on the command line.", 's' }
- ,{ "-u", "--url",           "Check a URL from the WWW", 's' }
+	//These ought to always be around
+  { "-l", "--load",       "Load a file on the command line.", 's' }
+ ,{ "-f", "--file",       "Get a file on the command line.", 's' }
+ ,{ "-u", "--url",        "Check a URL from the WWW", 's' }
+ ,{ "-o", "--output",     "Send output to this file", 's' }
 
-	/*Dump options*/
- ,{ "-s", "--rootstart",    "Define the root start node", 's' }
- ,{ "-e", "--jumpstart",      "Define the root end node", 's' }
- ,{ "-o", "--output",        "Send output to this file", 's' }
+	//These will probably end up being deprecated.
+	//But make sense for scripts and AI
+ ,{ "-s", "--rootstart",     "Define the root start node", 's' }
+ ,{ "-e", "--jumpstart",     "Define the root end node", 's' }
+ ,{ "-n", "--nodes",         "Define node key-value pairs (separated by comma)", 's' }
+ ,{ NULL, "--nodefile",      "Define node key-value pairs from a file", 's' }
 
-	/*...*/
+	//Most of this is for debugging	
 #ifdef SEE_FRAMING 
+ ,{ "-k", "--show-full-key",    "Show a full key"  }
  ,{ NULL, "--see-parsed-html",  "Dump the parsed HTML and stop." }
  ,{ NULL, "--see-parsed-lua",   "Dump the parsed Lua file and stop." }
- ,{ NULL, "--see-frames",       "Show the frames" }
+ ,{ NULL, "--see-crude-frames", "Show the frames at first pass" }
+ ,{ NULL, "--see-nice-frames",  "Show the frames at second pass" }
  ,{ NULL, "--step",             "Step through frames" }
 #endif
+
 #if 0
  ,{ "-b", "--backend",       "Choose a backend [mysql, pgsql, mssql]", 's'  }
 #else
@@ -1589,14 +1523,12 @@ Option opts[] = {
  ,{ NULL, "--pgsql",         "Choose PostgreSQL as the SQL template." }
  ,{ NULL, "--mssql",         "Choose SQL Server as the SQL template." }
 #endif
- ,{ "-c", "--check",          "Check what is being loaded by Lua." }
  ,{ "-v", "--verbose",        "Say more than usual" }
  ,{ "-h", "--help",           "Show help" }
  ,{ .sentinel = 1 }
 };
-#if 1
-int optKeydump = 0;
-#else
+
+#if 0
 //Command loop
 struct Cmd {
 	const char *cmd;
@@ -1626,14 +1558,16 @@ int main( int argc, char *argv[] ) {
 	int len=0;
 	int blen=0;
 	char *luaFile = NULL;
+
+	//Define and initailize these large structures.
 	wwwResponse www;
-	InnerProc pp = { 0 };
+	InnerProc pp;
+	memset( &www, 0, sizeof(wwwResponse) ); 
+	memset( &pp, 0, sizeof(InnerProc) ); 
 
 	//Define all of that mess up here
-//	int rootNode, jumpNode, activeNode;
-//	NodeSet *root=NULL, *jump=NULL;
-	uint8_t fkbuf[2048] = { 0 }, rkbuf[2048]={0};
-	char *fkey=NULL, *rkey=NULL, *pageUrl = NULL;
+	uint8_t fkbuf[KEYBUFLEN] = { 0 }, rkbuf[KEYBUFLEN]={0};
+	char *pageUrl = NULL;
 	Table *tHtml=NULL, *tYaml=NULL;
 	yamlList **ky = NULL;
 	int pageType=0;
@@ -1646,39 +1580,10 @@ int main( int argc, char *argv[] ) {
 		luaFile = opt_get( opts, "--load" ).s;
 		if ( !luaFile ) {
 			return err_print( 0, "%s", "No file specified." );	
-		}		
-	}
-	
-	//Show a full key
-	optKeydump = opt_set( opts, "--show-full-key" ); 
-
-	//If the user is just parsing, dump the parse and stop
-	if ( !luaFile /*&& opt_set(opts,"--see-parsed-html")*/ ) {
-		char *wd =NULL;
-
-		if ( opt_set( opts, "--url" ) ) {
-			pageType = PAGE_URL;
-			wd = "URL:";
-			if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
-				return err_print( 0, "No URL specified for dump." ); 
-			}
 		}
-		else if ( opt_set( opts, "--file" ) ) {
-			pageType = PAGE_FILE;
-			wd = "HTML document at";
-			if ( !(pageUrl = opt_get( opts, "--file" ).s) ) {
-				return err_print( 0, "No file specified for dump." ); 
-			}
-		}
-		else {
-			return err_print( 0, "--see-parsed-html specified but no source given (try --file, --url or --load flags).\n" );
-		}
-
-		VPRINTF( "Loading and parsing %s '%s'\n", wd, pageUrl );
-	}
-	else {
-		//
+		
 		VPRINTF( "Loading and parsing Lua document at %s\n", luaFile );
+		//
 		if ( !(tYaml = parse_lua( luaFile )) ) {
 			return err_print( 0, "%s", _errbuf  );
 		}
@@ -1686,12 +1591,32 @@ int main( int argc, char *argv[] ) {
 	#ifdef SEE_FRAMING
 		if ( opt_set( opts, "--see-parsed-lua" ) ) {
 			lt_kdump( tYaml );
-			lt_free( tYaml );
-			free( tYaml );
-			return 0;
+			died = 0;
+			goto destroy;
 		}
 	#endif
+	}
+	
+	//Load a webpage
+	if ( opt_set( opts, "--url" ) ) {
+		pageType = PAGE_URL;
+		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
+			return err_print( 0, "No URL specified for dump." ); 
+		}
+		VPRINTF( "Loading and parsing URL: '%s'\n",pageUrl );
+	}
 
+	//Load an HTML file 
+	if ( opt_set( opts, "--file" ) ) {
+		pageType = PAGE_FILE;
+		if ( !(pageUrl = opt_get( opts, "--file" ).s) ) {
+			return err_print( 0, "No file specified for dump." ); 
+		}
+		VPRINTF( "Loading and parsing HTML document at '%s'\n", pageUrl );
+	}
+
+	//Now get the hash map keys to map HTML to needed nodes
+	if ( tYaml ) {
 		//Shouldn't I catch this?
 		ky = keys_from_ht( tYaml );
 
@@ -1708,14 +1633,111 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 
+	//Also chop the nodes from here	
+	if ( opt_set(opts, "--nodes") || opt_set(opts, "--nodefile") ) { 
+		//chop command line args by a comma, or files by : and \n
+		const char types[] = { 'c', 'f' };
+		const char *args[] = { opt_get(opts,"--nodes").s,  opt_get(opts,"--nodefile").s };
+		const char *delims[] = { "=,", ":\n" };
+		
+		for ( int i=0; i<sizeof(args)/sizeof(char *); i++ ) {
+			if ( args[ i ] ) {
+				fprintf(stderr,"proc %s: '%s'\n", (types[i] == 'c') ? "arg" : "file", args[ i ] );	
+				const char *tmp = NULL;
+				if ( types[ i ] == 'c' )
+					tmp = args[ i ];
+				//TODO: This is ridiculous...
+				else {
+					struct stat sb = {0};
+					const char *file = args[ i ];
+					char *p = NULL;
+					int fn = 0;
+	
+					//TODO: None of these should be fatal, but for ease they're going to be
+					//Read file to memory
+					if ( stat( file, &sb ) == -1 ) {
+						err_print( 0, "%s", strerror( errno ) );
+						goto destroy;
+					}
+
+					//Open the file
+					if ( (fn = open( file, O_RDONLY )) == -1 ) {
+						err_print( 0, "%s", strerror( errno ) );
+						goto destroy;
+					}
+
+					//Allocate a buffer big enough to just write to memory.
+					if ( !(p = malloc( sb.st_size + 10 )) ) {
+						err_print( 0, "%s", strerror( errno ) );
+						goto destroy;
+					}
+
+					//Read the file into buffer	
+					if ( read( fn, p, sb.st_size ) == -1 ) {
+						free( p );
+						err_print( 0, "%s", strerror( errno ) );
+						goto destroy;
+					}
+
+					//Close the file?
+					if ( close( fn ) == -1 ) {
+						free( p );
+						err_print( 0, "%s\n", strerror( errno ) );
+						goto destroy;
+					}
+
+					tmp = p;
+				}
+
+				//Now walk through the memory.
+				if ( tmp && args[i] == 'c') {
+					Mem set;
+					int f=0, len=0;
+					yamlList *tp = NULL;
+
+					while ( strwalk( &set, tmp, delims[i] ) ) {
+						char buf[ 1024 ];
+						memset( &buf, 0, 1024 );
+						if ( !f++ ) {
+							tp = malloc(sizeof(yamlList));
+							memset( tp, 0, sizeof(yamlList));
+							memcpy( buf, &tmp[ set.pos ], set.size );
+							tp->k = strdup( buf );
+						}
+						else {
+							memcpy( buf, &tmp[ set.pos ], set.size );
+							tp->v = strdup( buf );
+							ADD_ELEMENT( ky, len, sizeof( yamlList * ), tp ); 
+							f = 0;
+						}
+					}
+					tp = malloc( sizeof(yamlList) );
+					memset( tp, 0, sizeof(yamlList));
+					ADD_ELEMENT( ky, len, sizeof( yamlList * ), tp ); 
+				#if 0
+					while ( (*ky)->k ) {
+						fprintf(stderr,"%s => %s\n", (*ky)->k, (*ky)->v );
+						ky++;
+					}
+				#endif
+				}
+			}
+		}
+
+exit( 0 );
+	}
+
+
 	//Load the page from the web (or from file, but right now from web)
 	if ( pageType == PAGE_URL && !load_www( pageUrl, &b, &blen, &www ) ) {
-		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
+		err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
+		goto destroy;
 	}
 
 	//Load the page from file
 	if ( pageType == PAGE_FILE && !load_page( pageUrl, &b, &blen, &www ) ) {
-		return err_print( 0, "Loading page '%s' failed.\n", pageUrl );
+		err_print( 0, "Loading page '%s' failed.\n", pageUrl );
+		goto destroy;
 	}
 
 #if 0
@@ -1725,100 +1747,108 @@ int main( int argc, char *argv[] ) {
 	}
 #endif
 
-	//Set length and content buffer
-	//www.len = blen;
-	//www.data = (uint8_t *)b;
-
 	//Create a hash table of all the HTML
 	if ( !(tHtml = parse_html( (char *)www.data, www.len )) ) {
-		return err_print( 0, "Couldn't parse HTML to hash Table" );
+		err_print( 0, "Couldn't parse HTML to hash Table" );
+		goto destroy;
 	}
 
 #ifdef SEE_FRAMING
 	//If parsing only, stop here
 	if ( opt_set( opts, "--see-parsed-html" ) ) {
+		if ( !opt_set( opts, "--file" ) && !opt_set( opts, "--url" ) && !luaFile )
+			return err_print( 0, "--see-parsed-html specified but no source given (try --file, --url or --load flags).\n" );
 		lt_kdump( tHtml );
-
-		//During testing, I didn't need to free anything.
-		lt_free( tHtml );
-		free( www.data );
-		free( tHtml );
-		return 0;
+		died = 0;
+		goto destroy;
 	}
 #endif
+
+	//If there are no nodes, we can't really do anything.
+	if ( !ky ) {
+		err_print( 1, "No key-value pairs defined!" );
+		goto destroy;
+	}
 
 	//Load Lua hashes first, if overriding, use those options
 	if ( tYaml ) {
-		pp.rootString = lt_text( tYaml, "root.origin" ),
-		pp.jumpString = lt_text( tYaml, "root.start" );
+		pp.root.fragment = lt_text( tYaml, "root.origin" );
+		pp.jump.fragment = lt_text( tYaml, "root.start" );
 	}
 
 	if ( opt_set( opts, "--rootstart" ) ) {
-		pp.rootString = opt_get( opts, "--rootstart" ).s; 
+		pp.root.fragment = opt_get( opts, "--rootstart" ).s; 
 	}
 
 	if ( opt_set( opts, "--jumpstart" ) ) {
-		pp.jumpString = opt_get( opts, "--jumpstart" ).s; 
+		pp.jump.fragment = opt_get( opts, "--jumpstart" ).s; 
+	}
+
+	if ( opt_set( opts, "--framestart" ) ) {
+		pp.framestart = opt_get( opts, "--framestart" ).s; 
+	}
+
+	if ( opt_set( opts, "--framestop" ) ) {
+		pp.framestop = opt_get( opts, "--framestop" ).s; 
 	}
 
 	//Find the root node.
-	if ( ( pp.rootNode = lt_geti( tHtml, pp.rootString ) ) == -1 ) {
-		return err_print( 0, "string '%s' not found.\n", pp.rootString );
+	if ( ( pp.root.node = lt_geti( tHtml, pp.root.fragment ) ) == -1 ) {
+		err_print( 0, "string '%s' not found.\n", pp.root.fragment );
+		goto destroy;
 	}
 
 	//Find the "jump" node.
-	if ( !pp.jumpString ) 
-		pp.jumpNode = pp.rootNode;
+	if ( !pp.jump.fragment ) 
+		pp.jump.node = pp.root.node;
 	else {
-		if ( (pp.jumpNode = lt_geti( tHtml, pp.jumpString) ) == -1 ) {
-			return err_print( 0, "jump string '%s' not found.\n", pp.jumpString );
+		//Assume that the jump fragment is full first... 
+		if ( (pp.jump.node = lt_geti( tHtml, pp.jump.fragment) ) == -1 ) {
+			int len = 0;	
+			char buf[ KEYBUFLEN * 2 ];
+			memset( &buf, 0, KEYBUFLEN * 2 );
+			memcpy( buf, pp.root.fragment, (len = strlen( pp.root.fragment )) );
+			memcpy( &buf[ len++ ], ".", 1 );
+			memcpy( &buf[ len ], pp.jump.fragment, strlen( pp.jump.fragment ) );
+			len += strlen( pp.jump.fragment );
+
+			//...test the root and jump fragments together otherwise.
+			if ( (pp.jump.node = lt_geti( tHtml, buf ) ) == -1 ) {
+				err_print( 1, "Couldn't find frame start strings '%s' or '%s'.\n", pp.jump.fragment, buf );
+				goto destroy;
+			}
 		}
 	}
 
-#if 0
-	SET_INNER_PROC( pp, tHtml, rootNode, jumpNode, fkey, rkey );
-#else
-	//Sorry :(  This is ass-ugly..
-	pp.parent = lt_retkv( tHtml, pp.rootNode );
+	//Set the rest of the InnerProc members
+	pp.parent = lt_retkv( tHtml, pp.root.node );
 	pp.srctable = tHtml;
-	//pp.jump = pp.jumpNode;
-	pp.key  = (char *)lt_get_full_key( tHtml, pp.jumpNode, fkbuf, sizeof(fkbuf) - 1 );
-	pp.rkey  = (char *)lt_get_full_key( tHtml, pp.rootNode, rkbuf, sizeof(rkbuf) - 1 );
-	pp.keylen = strlen( pp.key );
-	//We really shouldn't need this, I initialize to zero somewhere at the top of main()
-	pp.level = 0;
-	pp.tlist = NULL;
-	pp.tlistLen = 0;
-	pp.hlist = NULL;
-	pp.hlistLen = 0;
-	pp.checktable = NULL;
-#endif
+	pp.jump.complete = (char *)lt_get_full_key( tHtml, pp.jump.node, fkbuf, sizeof(fkbuf) - 1 );
+	pp.root.complete = (char *)lt_get_full_key( tHtml, pp.root.node, rkbuf, sizeof(rkbuf) - 1 );
+	pp.jump.len = strlen( pp.jump.complete );
+	pp.root.len = strlen( pp.jump.complete );
 
-#ifdef DEBUG
 	//Dump the processing structure ahead of processing 
 	print_innerproc( &pp );
-#endif	
 
 	//Start the extraction process 
 	lt_exec( tHtml, &pp, create_frames );
 
-#ifdef DEBUG
 	//Dump the processing structure after processing 
 	print_innerproc( &pp );
-	exit(0);
-#endif	
 
 	//If hlistLen is zero, we didn't find the frames...
 	if ( !pp.hlistLen ) {
-		return err_print( 1, "%s\n", "No frame nodes found!" );	
+		err_print( 1, "%s\n", "No frame nodes found!" );	
+		goto destroy;
 	}
 
 	//Build individual tables for each.
 	for ( int i=0; i<pp.hlistLen; i++ ) {
 		//TODO: For our purposes, 5743 is the final node.  Fix this.
 		int start = pp.hlist[ i ];
-		int end = ( i+1 > pp.hlistLen ) ? 5743 : pp.hlist[ i+1 ]; 
-
+		//int end = ( i+1 > pp.hlistLen ) ? tHtml->count : pp.hlist[ i+1 ]; 
+		int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
 		//Create a table to track occurrences of hashes
 		build_ctck( tHtml, start, end - 1 ); 
 
@@ -1829,29 +1859,37 @@ int main( int argc, char *argv[] ) {
 		pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
 
 		//Create a new table
-		lt_exec_complex( tHtml, start, end - 1, &pp, build_individual );
+		//TODO: Why -3?  
+		lt_exec_complex( tHtml, start, end - 3, &pp, build_individual );
 		lt_lock( pp.ctable );
 
-		if ( optKeydump ) {
+	#ifdef SEE_FRAMING
+		//Dump the "crude" frames...
+		if ( opt_set( opts, "--see-crude-frames" ) ) {
 			lt_kdump( pp.ctable );
+			if ( opt_set( opts, "--step" ) ) {
+				fprintf( stderr, "Press Enter to continue..." );
+				getchar();
+			}
 		}
+	#endif
 	}
 
-	#ifdef DEBUG
 	//Dump the processing structure after processing 
 	print_innerproc( &pp );
-exit( 0 );
-	#endif	
 
 	//Destroy the source table. 
 	lt_free( tHtml );
 
-	//Now check that each table has something
+	//This is supposed to be used to create our data string.
+	//We can stream to a number of formats, and should anticipate that.
+	//CSV, SQL, even Excel (or at least ODF) ought to be doable.
+	//That said, this looks like a job for a Function Pointer...
+
 	for ( int i=0; i<pp.tlistLen; i++ ) {
-		Table *tl = pp.tlist[ i ];
+		Table *tHtmllite = pp.tlist[ i ];
 
 		//TODO: Simplify this, by a large magnitude...
-		//yamlList *tn = testNodes;
 		int baLen = 0, vLen = 0, mtLen = 0;
 	#if 0
 		char *babuf=NULL, *vbuf=NULL, *fbuf=NULL;
@@ -1862,7 +1900,7 @@ exit( 0 );
 	#endif
 
 		//I need to loop through the "block" and find each hash
-		yamlList **keys = find_keys_in_mt( tl, ky, &mtLen );
+		yamlList **keys = find_keys_in_mt( tHtmllite, ky, &mtLen );
 	#if 0
 		while ( (*keys)->k ) {
 			fprintf( stderr, "%s - %s\n", (*keys)->k, (*keys)->v );
@@ -1911,13 +1949,30 @@ exit( 0 );
 			fprintf( stdout, "%s\n", fbuf );
 		}
 
-		lt_free( tl );
+		lt_free( tHtmllite );
 	}
 
+destroy:
 	//for ( ... ) free( hashlist );
 	//for ( ... ) free( pp.tlist );
 	//free( pp.hlist );
-	return 0; 
+	//Print error, then destroy everything?
+	//throw err
+	//free things...
+	if ( www.data ) {
+		free( www.data );
+	}
+
+	if ( tHtml ) {
+		lt_free( tHtml );
+		free( tHtml );
+	}
+
+	if ( tYaml ) { 
+		lt_free( tYaml );
+		free( tYaml );
+	}
+	return died;
 }
 
 
