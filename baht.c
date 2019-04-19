@@ -185,6 +185,11 @@ typedef struct wwwResponse {
 #endif
 } wwwResponse;
 
+typedef struct {
+	const char *name;	
+	int (*exec)( char *s, char **d, int * ); 
+	int isStatic;
+} Filter;
 
 enum pagetype {
 	PAGE_NONE
@@ -228,6 +233,15 @@ const char *errMessages[] = {
 const char *print_gumbo_type ( GumboNodeType t ) {
 	return gumbo_types[ t ];
 }
+
+
+//Filters
+#include "filters.c"
+const Filter filterSet[] = {
+	{ "asdf",       asdf_filter }
+, { "reverse" ,   rev_filter }
+, { NULL }
+};
 
 
 //Use this to return from functions
@@ -292,6 +306,14 @@ void print_tlist ( Table **tlist, int len, Table *ptr ) {
 		fprintf( stderr, "%p%s, ", t, (ptr == t) ? "(*)" : "" );
 	}
 	fprintf( stderr, "\n" );
+}
+
+
+void print_yamllist ( yamlList **yy ) {
+	while ( (*yy)->k ) {
+		fprintf( stderr, "%s - %s\n", (*yy)->k, (*yy)->v );
+		yy++;
+	}
 }
 
 
@@ -759,27 +781,106 @@ yamlList **keys_from_ht ( Table *t ) {
 
 //
 yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
-
 	yamlList **sql = NULL;
 	int h=0, sqlLen = 0;
+	const char *delims[] = { "|", "||", "&&", "() =>" };
+
 	while ( (*tn) ) {
-		if ( !(*tn)->v )
-			;//fprintf( stderr, "No target value for column %s\n", tn->k );	
+		char *k = (*tn)->k, *v = (*tn)->v;
+#if 0
+		if ( !v ) {
+			fprintf( stderr, "No target value for column %s\n", k );	
+		}
 		else {
-			//fprintf( stderr, "hash of %s: %d\n", (*tn)->v, lt_geti( t, (*tn)->v ) );
-			if ( (h = lt_geti( t, (*tn)->v )) == -1 )
-				0;
+#else
+		if ( v ) {
+#endif
+			//Use pipes for fancy things
+			char tmp[ 1024 ];
+			char *fv = NULL;
+			char **filters = NULL;
+			int flen = 0;
+
+			if ( memchrat( v, '|', strlen(v) ) == -1 )
+				fv = v;
 			else {
+				//find all the filters and set fv
+				//die here if a filter does not exist...
+				Mem set;
+				memset(&set,0,sizeof(Mem));
+				int f=0;
+
+				while ( strwalk( &set, v, "|" ) ) {
+					//the first one SHOULD always be the hash (and the filters go from there)
+					int xlen = 0;
+					uint8_t *x = trim( (uint8_t *)&v[ set.pos ], " \t", set.size, &xlen ); 
+					//write( 2, "[", 1 );write( 2, x, xlen );write( 2, "]\n", 2 );
+
+					if ( !f++ ) {
+						memset( tmp, 0, sizeof(tmp));
+						memcpy( tmp, x, xlen );
+						fv = tmp;
+					}
+					else {
+						//add each to a thing
+						char buf[ 1024 ];
+						memset( &buf, 0, sizeof( buf ) );
+						memcpy( buf, x, xlen );
+						char *filter = strdup( buf );
+						//check the filter availability here?
+						ADD_ELEMENT( filters, flen, char *, filter ); 
+					}
+				}
+
+				ADD_ELEMENT( filters, flen, char *, NULL );
+			}
+
+			//get the hash	
+			if ( (h = lt_geti( t, fv )) > -1 ) {
 				yamlList *kv = malloc( sizeof(yamlList) );
-				kv->k = (*tn)->k;
-				kv->v =	lt_text_at( t, h );  
+				memset( kv, 0, sizeof(yamlList) );
+				kv->k = k;
+
+				//Now cycle through each filter
+				if ( !filters ) 
+					kv->v =	lt_text_at( t, h );  
+				else {
+					char *str = lt_text_at( t, h );
+					char *src = malloc( strlen( str ) + 1 );
+					memset( src, 0, strlen(str) + 1 );
+					memcpy( src, str, strlen( str ));
+
+					//If a filter does not exist, no real reason to quit, but you can
+					while ( *filters ) {
+						//find the filter and run it
+						Filter *fltrs = (Filter *)filterSet;
+
+						while ( fltrs->name ) {
+							if ( strcmp( *filters, fltrs->name ) == 0 && fltrs->exec ) {
+								char *block = NULL;
+								int len = 0;
+								int status = fltrs->exec( src, &block, &len );
+								free( src );
+								src = malloc( len );	
+								memset( src, 0, len );
+								memcpy( src, block, len );  
+							}
+							fltrs++;
+						}
+
+						filters++;	
+					}
+
+					kv->v =	src;
+				}
+
 				ADD_ELEMENT( sql, sqlLen, yamlList *, kv ); 
 			}
 		}
 		tn++;
 	}
 	yamlList *term = malloc( sizeof(yamlList) );
-	term->k = NULL;
+	term->k = NULL; //term->v = NULL;
 	ADD_ELEMENT( sql, sqlLen, yamlList *, term );
 	*len = sqlLen;
 	return sql;
@@ -1570,6 +1671,7 @@ int main( int argc, char *argv[] ) {
 	char *pageUrl = NULL;
 	Table *tHtml=NULL, *tYaml=NULL;
 	yamlList **ky = NULL;
+	int kylen=0; 
 	int pageType=0;
 
 	//Set verbosity
@@ -1633,19 +1735,20 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 
+#if 1
 	//Also chop the nodes from here	
 	if ( opt_set(opts, "--nodes") || opt_set(opts, "--nodefile") ) { 
 		//chop command line args by a comma, or files by : and \n
 		const char types[] = { 'c', 'f' };
 		const char *args[] = { opt_get(opts,"--nodes").s,  opt_get(opts,"--nodefile").s };
-		const char *delims[] = { "=,", ":\n" };
+		const char *delims = "=,";// { "=,", ":\n" };
 		
 		for ( int i=0; i<sizeof(args)/sizeof(char *); i++ ) {
 			if ( args[ i ] ) {
 				fprintf(stderr,"proc %s: '%s'\n", (types[i] == 'c') ? "arg" : "file", args[ i ] );	
-				const char *tmp = NULL;
+				char *tmp = NULL;
 				if ( types[ i ] == 'c' )
-					tmp = args[ i ];
+					tmp = (char *)args[ i ];
 				//TODO: This is ridiculous...
 				else {
 					struct stat sb = {0};
@@ -1671,6 +1774,8 @@ int main( int argc, char *argv[] ) {
 						err_print( 0, "%s", strerror( errno ) );
 						goto destroy;
 					}
+	
+					memset(p,0,sb.st_size+10);	
 
 					//Read the file into buffer	
 					if ( read( fn, p, sb.st_size ) == -1 ) {
@@ -1688,14 +1793,28 @@ int main( int argc, char *argv[] ) {
 
 					tmp = p;
 				}
+		
+			#if 0
+				//always dump p when debugging
+				fprintf(stderr,"tmp:\n" ); fflush( stderr);
+				write( 2, tmp, strlen(tmp) );
+				fprintf(stderr,"\n" ); fflush( stderr);
+			#endif
 
 				//Now walk through the memory.
-				if ( tmp && args[i] == 'c') {
-					Mem set;
-					int f=0, len=0;
+				if ( tmp ) {
+					Mem set; //TODO: This must not be / is not thread safe... fix it
+					int f=0; 
 					yamlList *tp = NULL;
+					memset(&set,0,sizeof(Mem));
 
-					while ( strwalk( &set, tmp, delims[i] ) ) {
+					//turn text blocks into continuous strings (get rid of \n and use ',')
+					char *ff = tmp;
+					while ( *ff ) { *ff = (*ff == '\n') ? ',' : *ff; ff++; }
+					//this could be U/B...
+					ff--, *ff = '\0';
+				
+					while ( strwalk( &set, tmp, delims ) ) {
 						char buf[ 1024 ];
 						memset( &buf, 0, 1024 );
 						if ( !f++ ) {
@@ -1707,26 +1826,25 @@ int main( int argc, char *argv[] ) {
 						else {
 							memcpy( buf, &tmp[ set.pos ], set.size );
 							tp->v = strdup( buf );
-							ADD_ELEMENT( ky, len, sizeof( yamlList * ), tp ); 
+							ADD_ELEMENT( ky, kylen, sizeof( yamlList * ), tp ); 
 							f = 0;
 						}
 					}
-					tp = malloc( sizeof(yamlList) );
-					memset( tp, 0, sizeof(yamlList));
-					ADD_ELEMENT( ky, len, sizeof( yamlList * ), tp ); 
-				#if 0
-					while ( (*ky)->k ) {
-						fprintf(stderr,"%s => %s\n", (*ky)->k, (*ky)->v );
-						ky++;
-					}
-				#endif
 				}
 			}
 		}
 
-exit( 0 );
+#if 0
+		yamlList *tp = malloc( sizeof(yamlList) );
+		memset( tp, 0, sizeof(yamlList));
+		tp->k = NULL, tp->v = NULL;
+#endif
+		ADD_ELEMENT( ky, kylen, sizeof( yamlList * ), NULL ); 
+#if 0
+	print_yamllist( yy );
+#endif
 	}
-
+#endif
 
 	//Load the page from the web (or from file, but right now from web)
 	if ( pageType == PAGE_URL && !load_www( pageUrl, &b, &blen, &www ) ) {
@@ -1784,6 +1902,7 @@ exit( 0 );
 		pp.jump.fragment = opt_get( opts, "--jumpstart" ).s; 
 	}
 
+	#if 0
 	if ( opt_set( opts, "--framestart" ) ) {
 		pp.framestart = opt_get( opts, "--framestart" ).s; 
 	}
@@ -1791,8 +1910,14 @@ exit( 0 );
 	if ( opt_set( opts, "--framestop" ) ) {
 		pp.framestop = opt_get( opts, "--framestop" ).s; 
 	}
+	#endif
 
 	//Find the root node.
+	if ( !pp.root.fragment ) {
+		err_print( 0, "no root fragment specified.\n", pp.root.fragment );
+		goto destroy;
+	}
+
 	if ( ( pp.root.node = lt_geti( tHtml, pp.root.fragment ) ) == -1 ) {
 		err_print( 0, "string '%s' not found.\n", pp.root.fragment );
 		goto destroy;
@@ -1826,7 +1951,7 @@ exit( 0 );
 	pp.jump.complete = (char *)lt_get_full_key( tHtml, pp.jump.node, fkbuf, sizeof(fkbuf) - 1 );
 	pp.root.complete = (char *)lt_get_full_key( tHtml, pp.root.node, rkbuf, sizeof(rkbuf) - 1 );
 	pp.jump.len = strlen( pp.jump.complete );
-	pp.root.len = strlen( pp.jump.complete );
+	pp.root.len = strlen( pp.root.complete );
 
 	//Dump the processing structure ahead of processing 
 	print_innerproc( &pp );
@@ -1845,7 +1970,6 @@ exit( 0 );
 
 	//Build individual tables for each.
 	for ( int i=0; i<pp.hlistLen; i++ ) {
-		//TODO: For our purposes, 5743 is the final node.  Fix this.
 		int start = pp.hlist[ i ];
 		//int end = ( i+1 > pp.hlistLen ) ? tHtml->count : pp.hlist[ i+1 ]; 
 		int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
@@ -1902,11 +2026,7 @@ exit( 0 );
 		//I need to loop through the "block" and find each hash
 		yamlList **keys = find_keys_in_mt( tHtmllite, ky, &mtLen );
 	#if 0
-		while ( (*keys)->k ) {
-			fprintf( stderr, "%s - %s\n", (*keys)->k, (*keys)->v );
-			keys++;
-		}
-	#else
+		print_yamllist( keys ); exit( 0 );
 	#endif
 
 		//Then loop through matched keys and values
