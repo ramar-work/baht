@@ -13,13 +13,31 @@ SQLBIN=sqlcmd
 LDFLAGS=-lgumbo -llua -lgnutls -lcurl
 PREFIX=/usr/local
 
+# insecure test
+hr:
+	make top && ./baht -u http://ramarcollins.com/test.html \
+		--rootstart "div^root-main" \
+		--jumpstart "div^jump-main" \
+		--nodefile tests/ramartest.keys
+
+# ...
+hy:
+	make top && ./baht -u http://ramarcollins.com/test.html --see-parsed-html
+
+# file test
+ff:
+	make top && ./baht -f tests/unique.html \
+		--rootstart "div^devil serial-mastermind xxx-uu col-md7" \
+		--jumpstart "div^shaker tostada" \
+		--nodefile tests/unique.keys
+
 # top - Build the 'baht' scraper tool
 top: vendor/single.o
 	$(CC) $(CFLAGS) -DDEBUG vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME)
 
 # href - Build baht's http handling code 
 href: vendor/single.o
-	$(CC) $(CFLAGS) -DIS_TEST vendor/single.o web.c -L. -lgnutls -lcurl -o ref 
+	$(CC) $(CFLAGS) -DIS_TEST vendor/single.o web.c -L. -lgnutls -lcurl -o ref && ./ref
 
 # go - Run a typical query against a file
 go: vendor/single.o

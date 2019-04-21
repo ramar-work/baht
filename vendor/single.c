@@ -1012,9 +1012,53 @@ static const Mime mime[] = {
   {        "xul", "application/vnd.mozilla.xul+xml"                                                },
   {        "zip", "application/zip"                                                                },
 
-  {        NULL, NULL                                                                },
+  {        NULL, NULL         },
 };
 
+#if 0
+const char *mimes[] = {
+ "application/x-aac"                                                            
+,"audio/flac"                                                                  
+,"image/jpeg"                                                                 
+,"application/vnd.oasis.opendocument.spreadsheet"                            
+,"nothing,"
+,NULL
+};
+
+int main(int argc, char *argv[]) {
+	const char **m = mimes;
+	while ( *m ) {	
+		int p = mti_geti( *m );
+		fprintf( stderr, "mime: %d\n", p  );
+		fprintf( stderr, "filetype: %s, ", mti_getf( p )  );
+		fprintf( stderr, "mimetype: %s\n", mti_getm( p )  );
+		m++;
+	}
+	return 0;
+}
+#endif
+
+//Find the mimetype index, query with something else...
+int mti_geti (const char *mimename) {
+	int c=0, s = strlen(mimename);
+	Mime *m = (Mime *)mime;
+	while ( m->filetype ) {
+		if ( strcmp( m->mimetype, mimename ) == 0 ) return c;
+		m++, c++;
+	}
+	//Default mimetype
+	return MIME_UNKNOWN;
+}
+
+//get filetype by index
+const char *mti_getf (int ind) {
+	return mime[ ind ].filetype;
+}
+
+//get mimetype by index
+const char *mti_getm (int ind) {
+	return mime[ ind ].mimetype;
+}
 
 //Get extension and find the filetype
 const char *mtref (const char *mimename) {

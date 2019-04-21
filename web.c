@@ -1,8 +1,65 @@
 /*web.c - Handle any web requests*/
+#ifndef SSL_DEBUG 
+ #define SSLPRINTF( ... )
+ #define EXIT(x)
+ #define MEXIT(x,m)
+#else
+ #define SSLPRINTF( ... ) fprintf( stderr, __VA_ARGS__ ) ; fflush(stderr);
+ #define EXIT(x) \
+	fprintf(stderr,"Forced Exit.\n"); exit(x);
+ #define MEXIT(x,m) \
+	fprintf(stderr,m); exit(x);
+#endif
 
+#ifndef SHOW_REQUEST
+ #define DUMPRST( b, blen )
+#else
+ #define DUMPRST( b, blen ) write( 2, b, blen );
+#endif
+
+#ifndef SHOW_RESPONSE
+ #define DUMPRSP( b, blen )
+#else
+ #define DUMPRSP( b, blen ) write( 2, b, blen );
+#endif
+
+#ifndef WRITE_RESPONSE
+ #define WRITEF( fn, b, blen )
+#else
+ #define WRITEF( fn, b, blen ) write_to_file( fn, b, blen );
+#endif
+
+//This allows me to compile this file as an executable
+#ifndef _BAHTWEB
 #include "vendor/single.h"
 #include <curl/curl.h>
 #include <gnutls/gnutls.h>
+
+#ifndef DEBUG
+ #define RUN(c) (c)
+#else
+ #define RUN(c) \
+ (c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
+#endif
+
+//#define SHOW_RESPONSE
+#define SHOW_REQUEST
+#define VERBOSE 
+#define WRITE_RESPONSE
+#define SSL_DEBUG
+#define INCLUDE_TIMEOUT
+
+#ifndef VERBOSE
+ #define VPRINTF( ... )
+#else
+ #define VPRINTF( ... ) fprintf( stderr, __VA_ARGS__ ) ; fflush(stderr);
+#endif
+
+#define FPATH "html/"
+
+#ifndef FPATH
+ #define FPATH "./"
+#endif
 
 #define ADD_ELEMENT( ptr, ptrListSize, eSize, element ) \
 	if ( ptr ) \
@@ -13,12 +70,10 @@
 	*(&ptr[ ptrListSize ]) = element; \
 	ptrListSize++;
 
-
 typedef struct wwwResponse {
-	int status, len, clen, pad;
+	int status, len, clen, ctype;
 	uint8_t *data;
 	char *redirect_uri;
-//char *uri;
 } wwwResponse;
 
 
@@ -33,6 +88,16 @@ char _errbuf[2048] = {0};
 
 //User-Agent
 const char ua[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
+
+int err_set ( int status, char *fmt, ... ) {
+	va_list ap;
+	va_start( ap, fmt ); 
+	vsnprintf( _errbuf, sizeof( _errbuf ), fmt, ap );  
+	va_end( ap );
+	return status;
+}
+
+#endif
 
 //Write data to some kind of buffer with something
 static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *ud) {
@@ -51,17 +116,12 @@ static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *u
 }
 
 //
-int err_set ( int status, char *fmt, ... ) {
-	va_list ap;
-	va_start( ap, fmt ); 
-	vsnprintf( _errbuf, sizeof( _errbuf ), fmt, ap );  
-	va_end( ap );
-	return status;
-}
-
-void timer_handler (int signum ) {
+void timer_handler (int signum) {
 	static int count =0;
-	printf( "timer expired %d times\n", ++count );
+	fprintf( stdout, "timer expired %d times\n", ++count );
+	//when sockets die, they die
+	//no cleanup, this is bad, but I can deal with it for now, and even come up with a way to clean up provided data strucutres are in one place...
+	exit( 0 );	
 }
 
   // get sockaddr, IPv4 or IPv6:
@@ -90,13 +150,29 @@ int get_content_length (char *msg, int mlen) {
 }
 
 
-int get_status (char *msg, int mlen) {
+int get_content_type (char *msg, int mlen) {
+	int pos;
+	if ( (pos = memstrat( msg, "Content-Type", mlen )) == -1 ) { 
+		return -1;
+	}
 
+	int r = memchrat( &msg[ pos ], '\r', mlen - pos );	
+	int s = memchrat( &msg[ pos ], ' ', mlen - pos );	
+	char ctString[ 1024 ] = { 0 };
+	memcpy( ctString, &msg[ pos + (s+1) ], r - s );
+	//fprintf( stderr, "content-type: %s\n", ctString );exit(0);
+	return mti_geti( ctString );
+}
+
+
+
+int get_status (char *msg, int mlen) {
+	//NOTE: status line will not always have an 'OK'
 	const char *ok[] = {
-		"HTTP/0.9 200 OK"
-	, "HTTP/1.0 200 OK"
-	, "HTTP/1.1 200 OK"
-	, "HTTP/2.0 200 OK"
+		"HTTP/0.9 200"
+	, "HTTP/1.0 200"
+	, "HTTP/1.1 200"
+	, "HTTP/2.0 200"
 	, NULL
 	};
 	const char **lines = ok;
@@ -119,10 +195,45 @@ int get_status (char *msg, int mlen) {
 }
 
 
-int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
-	int c=0, sec, port;
-	const char *fp = NULL;
+void select_www( const char *addr, wwwType *t ) {
+	//Checking for secure or not...
+	if ( memcmp( "https", addr, 5 ) == 0 ) {
+		t->secure = 1;
+		t->port = 443;
+		t->fragment = 0;
+		//p = &p[8];
+		//fp = &p[8];
+	}
+	else if ( memcmp( "http", addr, 4 ) == 0 ) {
+		t->secure = 0;
+		t->port = 80;
+		t->fragment = 0;
+		//p = &p[7];
+		//fp = &p[7];
+	}
+	else {
+		t->fragment = 1;
+		//t->secure = 0;
+		//t->port = 0;
+		//fp = p;
+	}
+}
 
+
+int load_www ( const char *p, wwwResponse *r ) {
+	const char *fp = NULL;
+	wwwType t;
+	memset(&t,0,sizeof(wwwType));
+#if 1
+	select_www( p, &t );
+	if ( t.fragment ) /*load_www can never make a request like this*/
+		return 0;
+	else { 
+		p = ( t.secure ) ? &p[8] : &p[7];
+		fp = p;
+	}
+#else
+	int sec, port;
 	//Checking for secure or not...
 	if ( memcmp( "https", p, 5 ) == 0 ) {
 		sec = 1;
@@ -141,10 +252,10 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 		port = 80;
 		fp = p;
 	}
-
+#endif
 	int err, ret, sd, ii, type, len;
 	unsigned int status;
-	Socket s = { .server   = 0, .proto    = "tcp" };
+	Socket s = { .server = 0, .proto = "tcp" };
 	gnutls_session_t session;
 	memset( &session, 0, sizeof(gnutls_session_t));
 	gnutls_datum_t out;
@@ -159,12 +270,11 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 	const char *site = NULL; 
 	const char *urlpath = NULL;
 	const char *path = NULL;
+	int c=0; 
 
 	//Chop the URL very simply and crudely.
-	if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
-		path = "/";
-		root = p;
-	}
+	if (( c = memchrat( p, '/', strlen( p ) )) == -1 )
+		path = "/", root = p;
 	else {	
 		memcpy( rootBuf, p, c );
 		path = &p[ c ];
@@ -179,20 +289,24 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 	;
 
 	//Pack a message
-	if ( port != 443 )
+	if ( t.port != 443 )
 		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
 	else {
 		char hbbuf[ 128 ] = { 0 };
-		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
-		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
+		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, t->port );
+		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, t.port );
 		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
 	}
+
+	//Show the response if asked
+	DUMPRST( GetMsg, len ); 
+	//EXIT(0);
 
 	//NOTE: Although it is definitely easier to use CURL to handle the rest of the 
 	//request, dealing with TLS at C level is more complicated than it probably should be.  
 	//Do either an insecure request or a secure request
-	if ( !sec ) {
-#if 1
+	if ( !t.secure ) {
+#if 0
 		//Use libCurl
 		CURL *curl = NULL;
 		CURLcode res;
@@ -216,35 +330,53 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 			*dest = (char *)sb.buf;
 		}	
 #else
-	fprintf(stderr,"%s -> %d\n", root, port );
+
 		//socket connect is the shorter way to do this...
 		struct addrinfo hints, *servinfo, *pp;
 		int rv;
 		int sockfd;
 		char s[ INET6_ADDRSTRLEN ];
 		char b[ 10 ] = { 0 };
-		snprintf( b, 10, "%d", port );	
+		snprintf( b, 10, "%d", t.port );	
 		memset( &hints, 0, sizeof( hints ) );
 		hints.ai_family = AF_UNSPEC;
 		hints.ai_socktype = SOCK_STREAM;
-		fprintf(stderr,"Attempting connection to '%s':%d\n", root, port);
-		fprintf(stderr,"Full path (%s)\n", p );
+		VPRINTF("Attempting connection to '%s':%d\n", root, t.port);
+		VPRINTF("Full path (%s)\n", p );
 		//fprintf(stderr, "%s\n", p );
 
-	#if 0
-		//I'd have to set an alarm here, which means an interrupt
-		struct sigaction sa;
+	#ifdef INCLUDE_TIMEOUT 
+		//Set up a timer to kill requests that are taking too long.
+		//TODO: There is an alternate way to do with with socket(), I think
 		struct itimerval timer;
+		memset( &timer, 0, sizeof(timer) );
+	#if 0
+		signal( SIGVTALRM, timer_handler );
+	#else
+		struct sigaction sa;
 		memset( &sa, 0, sizeof(sa) );
 		sa.sa_handler = &timer_handler;
 		sigaction( SIGVTALRM, &sa, NULL );
-		timer.it_value.tv_sec = 0;	
-		timer.it_value.tv_usec = 250000;
+	#endif
+		//Set timeout to 3 seconds (remember: no cleanup takes place...)
+		timer.it_interval.tv_sec = 0;	
+		timer.it_interval.tv_usec = 0;
+		//NOTE: For timers to work, both it_interval and it_value must be filled out...
+		timer.it_value.tv_sec = 2;	
+		timer.it_value.tv_usec = 0;
 		//if we had an interval, we would set that here via it_interval
-		setitimer( ITIMER_VIRTUAL, &timer, NULL );	
+		if ( setitimer( ITIMER_VIRTUAL, &timer, NULL ) == -1 ) {
+			fprintf( stderr, "Set Timer Error: %s\n", strerror( errno ) );
+			return 0;
+		}
+	#if 0	
+		int ffd = open( "/dev/null", O_RDWR );
+		for (int p=0;p<30000000;p++) write(ffd,"asdf",4);
+	#endif
 	#endif
 
 		//Get the address info of the domain here.
+		//TODO: Use Bind or another library for this.  Apparently there is no way to detect timeout w/o using a signal...
 		if ( (rv = getaddrinfo( root, b, &hints, &servinfo )) != 0 ) {
 			fprintf( stderr, "getaddrinfo: %s\n", gai_strerror( rv ) );
 			return 0;
@@ -275,6 +407,12 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 
 		//Get the internet address
 		inet_ntop(pp->ai_family, get_in_addr((struct sockaddr *)pp->ai_addr),s, sizeof s);
+	#ifdef INCLUDE_TIMEOUT 
+		struct sigaction da;
+		da.sa_handler = SIG_DFL;
+		sigaction( SIGVTALRM, &da, NULL );
+	#endif
+
     fprintf(stderr,"Client connected to: %s\n", s );
 		freeaddrinfo(servinfo);
 
@@ -290,7 +428,6 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
 			}
 		
 			sb += b;
-			
 			if ( sb != mlen ) {
 				fprintf(stderr, "%d total bytes sent\n", sb );
 				continue;
@@ -302,109 +439,119 @@ int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
  
 		//WE most likely will receive a very large page... so do that here...	
 		int first=0;
-		int clen=0;
-		int br=0;
-		char *msg = malloc(1);
-		while ( 1 ) {
-			int b;
+		int crlf=-1;
+		int chunked=0;
+		uint8_t *msg = malloc(1);
 
-			//Stop reading
-			if ( (clen && br > -1 && rb == (clen + br)) ) { 
-				fprintf(stderr, "%s\n", "No new bytes sent.  Jump out of loop." );
+		while ( 1 ) {
+			uint8_t xbuf[ 4096 ];
+			memset( xbuf, 0, sizeof(xbuf) );
+			int blen = recv( sockfd, xbuf, sizeof(xbuf), 0 );
+
+			if ( blen == -1 ) {
+				SSLPRINTF( "Error receiving mesaage to: %s\n", s );
 				break;
 			}
-
-			if (( b = recv( sockfd, buf, sizeof(buf), 0 )) == -1 ) {
-				fprintf(stderr, "Error receiving mesaage to: %s\n", s );
+			else if ( !blen ) {
+				SSLPRINTF( "%s\n", "No new bytes sent.  Jump out of loop." );
 				break;
 			}
 
 			if ( !first++ ) {
-				clen = get_content_length( buf, b );
-				br = memstrat( buf, "\r\n\r\n", b );
-				fprintf(stderr, "found content length and eoh: %d, %d\n", clen, br );	
-			}
-
-			if ( !b ) {
-				fprintf(stderr, "%s\n", "No new bytes sent.  Jump out of loop." );
-				break;
+				r->status = get_status( (char *)xbuf, blen );
+				r->clen = get_content_length( (char *)xbuf, blen );
+				r->ctype = get_content_type( (char *)xbuf, blen );
+				chunked = memstrat( xbuf, "Transfer-Encoding: chunked", blen ) > -1;
+				if ( chunked ) {
+					SSLPRINTF( "%s\n", "Chunked not implemented for HTTP" );
+					return err_set( 0, "%s\n", "Chunked not implemented for HTTP" );
+				}
+				if (( crlf = memstrat( xbuf, "\r\n\r\n", blen ) ) == -1 ) {
+					0;//this means that something went wrong... 
+				}
+				//fprintf(stderr, "found content length and eoh: %d, %d\n", r->clen, crlf );
+				crlf += 4;
+				//write( 2, xbuf, blen );
 			}
 
 			//read into a bigger buffer	
-			msg = realloc( msg, rb + b );
-			memcpy( &msg[ rb ], buf, b ); 
+			msg = realloc( msg, r->len + blen );
+			memcpy( &msg[ r->len ], xbuf, blen ); 
+			r->len += blen;
 
-			//you need to do realloc magic here...
-			fprintf(stderr,"received %d bytes this invocation\n", b );
-			fprintf(stderr,"received %d total bytes\n", rb );
-			rb += b;
+			//info about the session
+			SSLPRINTF( "recvd: %d , clen: %d , mlen: %d\n", r->len - crlf, r->clen, r->len );
+
+			if ( !r->clen ) {
+				return err_set( 0, "%s\n", "No length specified, parser error!." );
+			}
+			else if ( r->clen && ( r->len - crlf ) == r->clen ) {
+				SSLPRINTF( "Full HTTP message received\n" );
+				break;
+			}
 		}
-		#if 1
-		write( 2, msg, rb );
-		#endif 	
-		*dest = msg;
-		*destlen = rb;
+		//r->data = (uint8_t *)msg;
+		r->data = msg;
 #endif
 	}
 	else {
 		//Do socket connect (but after initial connect, I need the file desc)
-		if ( !socket_connect( &s, root, port ) ) {
+		if ( !socket_connect( &s, root, t.port ) ) {
 			return err_set( 0, "%s\n", "Couldn't connect to site... " );
 		}
 
-		//GnuTLS
-		if ( !gnutls_check_version("3.4.6") ) { 
+		if ( RUN( !gnutls_check_version("3.4.6") ) ) {
 			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
 		}
 
-		//Is this needed?
-		if ( ( err = gnutls_global_init() ) < 0 ) {
+		if ( RUN( ( err = gnutls_global_init() ) < 0 ) ) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
-		if ( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 ) {
+		if ( RUN( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 )) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
-		if ( ( err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 ) {
+		if ( RUN( (err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 )) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
+
 		/*
 		//Set client certs this way...
 		gnutls_certificate_set_x509_key_file( xcred, "cert.pem", "key.pem" );
 		*/	
 
 		//Initialize gnutls and set things up
-		if ( ( err = gnutls_init( &session, GNUTLS_CLIENT ) ) < 0 ) {
+		if ( RUN( ( err = gnutls_init( &session, GNUTLS_CLIENT ) ) < 0 )) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
-		if ( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, root, strlen(root)) < 0)) {
+		if ( RUN( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, root, strlen(root)) ) < 0)) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
-		if ( ( err = gnutls_set_default_priority( session ) ) < 0 ) {
+		if ( RUN( (err=gnutls_set_default_priority( session ) ) < 0) ) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 		
-		if ( ( err = gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, xcred )) <0 ) {
+		if ( RUN( ( err = gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, xcred )) < 0) ) {
 			return err_set( 0, "%s\n", gnutls_strerror( err ));
 		}
 
+		//Set random handshake details
 		gnutls_session_set_verify_cert( session, root, 0 );
-		//fprintf( stderr, "s.fd: %d\n", s.fd );
 		gnutls_transport_set_int( session, s.fd );
 		gnutls_handshake_set_timeout( session, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT );
 
-fprintf(stderr,"sizeof: %ld\n", sizeof(buf)); exit(0);
-		//This is ass ugly...
+		//Do the first handshake
 		do {
-			 ret = gnutls_handshake( session ) ;
+			 RUN( ret = gnutls_handshake( session ) );
 		} while ( ret < 0 && gnutls_error_is_fatal( ret ) == 0 );
 
+		//Check the status of said handshake
 		if ( ret < 0 ) {
 			fprintf( stderr, "ret: %d\n", ret );
-			if ( ret == GNUTLS_E_CERTIFICATE_VERIFICATION_ERROR ) {	
+			if ( RUN( ret == GNUTLS_E_CERTIFICATE_VERIFICATION_ERROR ) ) {	
 				type = gnutls_certificate_type_get( session );
 				status = gnutls_session_get_verify_cert_status( session );
 				err = gnutls_certificate_verification_status_print( status, type, &out, 0 );
@@ -415,84 +562,83 @@ fprintf(stderr,"sizeof: %ld\n", sizeof(buf)); exit(0);
 			return err_set( 0, "%s\n", "Handshake failed: %s\n", gnutls_strerror( ret ));
 		}
 		else {
-			desc = gnutls_session_get_desc( session );
+			desc = gnutls_session_get_desc( session );		
+			//consider dumping the session info here...
 			fprintf( stdout, "- Session info: %s\n", desc );
 			gnutls_free( desc );
 		}
 
 		//This is the initial request... wtf were you thinking?
-		if ( ( err = gnutls_record_send( session, GetMsg, len ) ) < 0 )
+		if ( RUN(( err = gnutls_record_send( session, GetMsg, len ) ) < 0 ) )
 			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
 
 		//This is a sloppy quick way to handle EAGAIN
-		int statter=0;
 		int first = 0;
-		char *msg = malloc(1);
-		int buflen;
-		int rb = 0;
 		int chunked = 0;
+		int crlf = -1;
+		char *msg = malloc(1);
+	#ifdef SSL_DEBUG
 		char **ptrarr = NULL;
 		int ptrarrlen = 0;
 		int *szarr = NULL;
 		int szarrlen = 0;
-	#if 1
-//fprintf(stderr, "%d\n", sz); exit(0);
-
+	#endif
+	
+		//there should probably be another condition used...
 		while ( 1 ) {
+			char xbuf[ 4096 ];
+			memset( xbuf, 0, sizeof(xbuf) ); 
+			int ret = gnutls_record_recv( session, xbuf, sizeof(xbuf)); 
+			SSLPRINTF( "gnutls_record_recv returned %d\n", ret );
 
 			//receive
-			if ((ret = gnutls_record_recv( session, buf, sizeof(buf))) == 0 ) {
-				fprintf( stderr, " - Peer has closed the TLS Connection\n" );
-				break;	
+			if ( !ret ) {
+				SSLPRINTF( "Peer has closed the TLS Connection\n" );
+				break;
 			}
 			else if ( ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) {
-				fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-				//statter = 5;
+				SSLPRINTF( "Warning: %s\n", gnutls_strerror( ret ) );
 				continue;
 			}
 			else if ( ret < 0 ) {
-				fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
+				SSLPRINTF( "Error: %s\n", gnutls_strerror( ret ) );
 				break;	
 			}
 			else if ( ret > 0 ) {
-				//Assuming that we've received packets, let's start reading
-				fprintf( stdout, "Recvd %d bytes:\n", ret );
-				//Don't move forward if it's anything but 200 OK.
-				//There are more creative ways to do this...
+				SSLPRINTF( "Recvd %d bytes:\n", ret );
 				if ( !first++ ) {
-					r->status = get_status( (char *)buf, ret );
-					r->clen = get_content_length( buf, ret );
-					//is it chunked or not?
-					chunked = memstrat( buf, "Transfer-Encoding: chunked", ret ) > -1;
-					//find the crlf
-					int crlf = memstrat( buf, "\r\n\r\n", ret );
-					if ( crlf == -1 )
+					//Get status, content-length or xfer-encoding if available 
+					r->status = get_status( (char *)xbuf, ret );
+					r->clen = get_content_length( xbuf, ret );
+					r->ctype = get_content_type( (char *)xbuf, ret );
+					chunked = memstrat( xbuf, "Transfer-Encoding: chunked", ret ) > -1;
+					if ((crlf = memstrat( xbuf, "\r\n\r\n", ret )) == -1 ) {
+						SSLPRINTF( "%s\n", "No CRLF sequence found, response malformed." );
 						return err_set( 0, "%s\n", "No CRLF sequence found, response malformed." );
-					else  {
-						char *m = &buf[ crlf + 4 ];
-						//parse the chunked length
-						int lenp = memstrat( m, "\r\n", ret - (crlf+4));	
-						//do i save this length and re-request?
-						char lenpbuf[ 10 ] = {0};
-						memcpy( lenpbuf, m, lenp );
-						//convert hex to something else
-						int sz = 0;
-						//do we read a chunk of this size?
-						//it seems like i still need to send something back
 					}
-					fprintf( stderr, "Got status: %d\n", r->status );
-					fprintf( stderr, "Got clen: %d\n", r->clen );
-					//"Transfer-Encoding: chunked"
-					//"transfer-encoding: chunked"
-					//"Transfer-Encoding: Chunked"
-					fprintf( stderr, "is chunked?: %s\n", chunked ? "t" : "f" );
-write(2, buf, ret );
-//exit( 0 );
+		
+					//Increment the crlf by the length of "\r\n\r\n"	
+					crlf += 4;
+					if ( chunked ) {
+						char *m = &xbuf[ crlf ];
+						//parse the chunked length
+						int lenp = memstrat( m, "\r\n", ret - crlf );	
+						//to save chunk length, I need to convert to hex to decimal
+						char lenpxbuf[ 10 ] = {0};
+						memcpy( lenpxbuf, m, lenp );
+						int sz = 0; //atoi( lenpxbuf );
+					}
+					
+					SSLPRINTF( "Got %s.",chunked ?"chunked message.":"message w/ content-length.");
+					SSLPRINTF( "Got status: %d\n", r->status );
+					SSLPRINTF( "Got clen: %d\n", r->clen );
+					SSLPRINTF( "%s\n", "Initial message:" );
+				  write(2, xbuf, ret );
 				}
 
-				if ( ret == 5 ) {
-					if ( memcmp( buf, "0\r\n\r\n", 5 ) == 0 ) {
+				//Finalize chunked messages.
+				if ( chunked && ret == 5 ) {
+					if ( memcmp( xbuf, "0\r\n\r\n", 5 ) == 0 ) {
 						fprintf(stderr, "the last one came in" );
 						break;
 					}
@@ -502,35 +648,45 @@ write(2, buf, ret );
 				}
 			}
 
-			//read into a bigger buffer	
-#if 0
-			msg = realloc( msg, rb + ret );
-			memcpy( &msg[ rb ], buf, ret ); 
-#else
-			msg = malloc( ret + 1 );
-			memcpy( msg, buf, ret );
-			ADD_ELEMENT( ptrarr, ptrarrlen, char *, msg );
+		#ifdef SSL_DEBUG
+			char *xmsg = malloc( ret + 1 );
+			memcpy( xmsg, xbuf, ret );
+			ADD_ELEMENT( ptrarr, ptrarrlen, char *, xmsg );
 			ADD_ELEMENT( szarr, szarrlen, int, ret );
-#endif
-		#if 0
-			fprintf( stderr,"recvd %d bytes... ", ret );
-			write( 2, &msg[ rb ], 10 );
-			write( 2, &msg[ rb ], ret );
 		#endif
-			rb += ret;
 
-			//if it's chunked, try sending a 100-continue
+			//Read into a bigger buffer	
+			if ( !(msg = realloc( msg, r->len + ( ret + 1 ) )) ) {
+				SSLPRINTF( "%s\n", "Realloc of destination buffer failed." );
+				return err_set( 0, "%s\n", "Realloc of destination buffer failed." );
+			}
+			memcpy( &msg[ r->len ], xbuf, ret );
+			r->len += ret;
+
+			//If it's chunked, try sending a 100-continue
 			if ( chunked ) {
 				const char *cont = "HTTP/1.1 100 Continue\r\n\r\n";
 				//int err = gnutls_record_send( session, cont, strlen(cont)); 
 				fprintf(stderr, "%s (%d)\n", gnutls_strerror( err ), err );
 			}
-		}
+			else {
+				if ( !r->clen ) {
+					SSLPRINTF( "%s\n", "No length specified, parser error!." );
+					return err_set( 0, "%s\n", "No length specified, parser error!." );
+				}
+				else if ( r->clen && ( r->len - crlf ) == r->clen ) {
+					SSLPRINTF( "Full message received: clen: %d, mlen: %d", r->clen, r->len );
+					break;
+				}
+				SSLPRINTF( "recvd: %d , clen: %d , mlen: %d\n", r->len - crlf, r->clen, r->len );
+			}
+		} /* end while */
 
 		if ((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 ) {
 			//return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
 		}
-
+	
+	#ifdef SSL_DEBUG
 		//This worked...
 		int sz=0;
 		for ( int x = 0; x<szarrlen; x++ ) sz += szarr[ x ];
@@ -544,176 +700,150 @@ write(2, buf, ret );
 			write( 2, pt, 10 );
 			write( 2, "' }\n", 4 );
 		}
-	#else
-		//This looks like it is just grabbing the header...
-		while ( statter < 5 ) {
-			if (  (ret = gnutls_record_recv( session, msg, sizeof(msg))) == 0 ) {
-				fprintf( stderr, " - Peer has closed the TLS Connection\n" );
-				//goto end;
-				statter = 5;
-			}
-			else if (  ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) {
-				fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-				//statter = 5;
-			}
-			else if (  ret < 0 ) {
-				fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-			}
-			else if (  ret > 0 ) {
-				//it looks like we MAY have received a packet here.
-				statter = 5;
-				break;
-			}
-
-			fprintf( stderr, "%d: %d\n", statter, ret );
-			statter++;
-		}
-
-		if ( ret > 0 ) {
-			fprintf( stdout, "Recvd %d bytes:\n", ret );
-			fflush( stdout );
-			write( 1, msg, ret );
-			fflush( stdout );
-			fputs( "\n", stdout );
-			len = ret;
-
-			//I don't know if I can always assume that this is complete.
-			//If the status is 200 OK, and Content-Length is there, keep reading
-			const char *ok[] = {
-				"HTTP/0.9 200 OK"
-			, "HTTP/1.0 200 OK"
-			, "HTTP/1.1 200 OK"
-			, "HTTP/2.0 200 OK"
-			, NULL
-			};
-			const char **lines = ok;
-
-			//This is a bad message
-			int stat = 0;
-			while ( *lines ) {
-				//fprintf(stderr,"%s\n",*lines);
-				if ( memcmp( msg, *lines, strlen(*lines) ) == 0 ) {
-					stat = 1;
-					char statWord[ 10 ] = {0};
-					memcpy( statWord, &msg[ 9 ], 3 );
-					r->status = atoi( statWord );
-					break;
-				}
-				lines++;
-			}
-
-			//This is a bad message?
-			if ( stat ) {
-				int pos = 0;
-				int r = 0;
-				int s = 0;
-				int len = 0;
-				char lenString[ 24 ] = {0};
-				uint8_t bmsg[ 327680 ] = {0};
-				int pl = 0;
+	#endif
 	
-				//
-				if ( (pos = memstrat( msg, "Content-Length", ret )) == -1 ) {
-					fprintf(stderr,"Error out, no length, somethings' wrong...\n" );
-				}
-				r = memchrat( &msg[ pos ], '\r', ret - pos );	
-				s = memchrat( &msg[ pos ], ' ', ret - pos );	
-				memcpy( lenString, &msg[ pos + (s+1) ], r - s );
-				len = atoi( lenString );
-				//r->len = len;
-
-				//Read everything
-				while ( len ) {
-					//Seems like the message needs to be malloc'd / realloc'd...
-					if (  (ret = gnutls_record_recv( session, &bmsg[ pl ], sizeof(bmsg))) == 0 ) {
-						fprintf( stderr, " - Peer has closed the TLS Connection\n" );
-						//goto end;
-					}
-					else if (  ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) {
-						fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
-						//goto end;
-					}
-					else if (  ret < 0 ) {
-						fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
-						//why would a session be invalidated?
-						//goto end;
-					}
-					else if (  ret > 0 ) {
-						//it looks like we MAY have received a packet here.
-						pl += ret;
-						len -= ret;
-						//fprintf(stderr,"%d left...\n", len); 
-					}
-				}
-			#if 0
-				//Quick dump
-				write( 2, msg, p );
-			#endif
-				//Set pointers 
-				*dest = malloc( pl + 1 ); 
-				*destlen = pl;
-				memcpy( *dest, bmsg, *destlen );
-			}
-		}
-
-		//At this point, I've got to get smart and write things into a structure.
-		#if 0
-		var a = {
-			status = int (only 200s should go)
-		, redirectUri = char (use this if it's a 302 or something, and try again)
-		, data = all of the packet data (the data to parse)
-		, len = int (length of response)
-		}
-		#endif
-	#endif
-
-	#if 0 
-		if ((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 ) {
-			return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
-		}
-	#endif
-
+		//Set refs
+		r->data = (uint8_t *)msg;
 	}
 	return 1;
 }
 
 
-#ifdef IS_TEST
-//the things to worry about...
-//
-// - hanging because of address issues
-//const char *urls[] = {
-struct U { char *url; int i; wwwResponse www; } urls[] = {
-#if 0
-	"http://www.ramarcollins.com"
-#else
-	{	"https://www.google.com/search?client=opera&q=gnutls+error+string&sourceid=opera&ie=UTF-8&oe=UTF-8" }
-//"https://www.importmotorsportsnc.com/cars-for-sale"
-	//"https://cabarruscountycars.com/legacy" //contains clen
-	//"https://www.heritagerides.com/inventory.aspx"
+#ifdef WRITE_RESPONSE
+char bytes[ 24 ];
+char *fname ( char *ptr ) {
+	memset( &bytes, 0, sizeof( bytes ) );
+	int sl = strlen( ptr );
+	int l = sizeof(bytes) < sl ? sizeof(bytes) : sl; 
+	for ( int i=0; i < l; i++ ) {
+		bytes[ i ] = ( memchr( "./:", ptr[ i ], 3 ) ) ? '_' : ptr[ i ]; 
+	}
+	return bytes;
+}
+
+
+int write_to_file ( const char *filename, uint8_t *buf, int buflen ) {
+	char fn[ 2048 ];
+	memset( fn, 0, sizeof(fn) );
+	memcpy( fn, FPATH, strlen(FPATH));
+	memcpy( &fn[ strlen(FPATH) ], filename, strlen(filename));
+	memcpy( &fn[ strlen(FPATH) + strlen(filename) ], ".html", 5 );
+
+	int fd = open( fn, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
+	if ( fd == -1 ) {
+		VPRINTF( "open failed: %s\n", strerror( errno ) );
+		return 0;
+	}
+
+	int nb = write( fd, buf, buflen );
+	if ( nb == -1 ) {
+		VPRINTF( "write failed: %s\n", strerror( errno ) );
+		return 0;
+	}
+
+	if ( close( fd ) == -1 ) {
+		VPRINTF( "write failed: %s\n", strerror( errno ) );
+		return 0;
+	}
+
+	return 1;
+}
 #endif
- ,{ NULL }
+
+
+#ifdef IS_TEST
+
+#if 0
+ #include "tests/urlHttp.c"
+ #include "tests/urlHttps.c"
+ #include "tests/urlShort.c"
+ #include "tests/url.c"
+#endif
+
+typedef struct { char *url; int i; wwwResponse www; } Url;
+Url urls[] = {
+	{ "dummy" }
+#if 1
+// #include "tests/urlHttps.c"
+#else
+//these seem to work...
+, { "http://www.ramarcollins.com" }
+, { "https://cabarruscountycars.com/legacy" } //contains clen
+, {	"https://www.google.com/search?client=opera&q=gnutls+error+string&sourceid=opera&ie=UTF-8&oe=UTF-8" }
+
+//so why not these? (they do, but they reject bots... so you'll need js)
+, { "https://www.heritagerides.com/inventory.aspx" /*This one just doesn't work... (js block)*/ }
+, { "https://www.importmotorsportsnc.com/cars-for-sale" }
+#endif
+, { NULL }
 };
 
+
+
 int main (int argc, char *argv[]) {
-	//
+
+	//...
 	wwwResponse w;
-	struct U *j = urls;
 	char *buf = NULL;
 	int buflen = 0;
-	fprintf( stderr, "Running test suite...\n" );
+	VPRINTF( "Running test suite...\n" );
 
 	//Loop	
-	while ( j->url ) {
-		if ( !( j->i = load_www( j->url, &buf, &buflen, &j->www ) ) ) {
-			fprintf( stderr, "Failed to load URL at '%s'\n", j->url );
+	if ( 1 ) {
+		Url *j = urls;
+		j++; //always skip the first, since it's a dummy to make changing data easier...
+		while ( j->url ) {
+		#if 0
+			fprintf( stderr, "Trying URL at '%s'\n", j->url );
+		#else
+			//if ( !( j->i = load_www( j->url, &buf, &buflen, &j->www ) ) ) {
+			if ( !( j->i = load_www( j->url, /*&buf, &buflen,*/ &j->www ) ) ) {
+				fprintf( stderr, "Failed to load URL at '%s'\n", j->url );
+			}
+		#endif
+			j++;
 		}
-		j++;
 	}
 
 	//Dump the results...
+	if ( 0 ) {
+		Url *j = urls;
+		j++;
+
+		while ( j->url ) {
+			wwwResponse *w = &j->www;
+			memset( w, 0, sizeof(wwwResponse) );
+			fprintf( stderr, "Site:             %s\n", j->url );
+			fprintf( stderr, "Status:           %d\n", w->status );
+			fprintf( stderr, "Content Length:   %d\n", w->clen );
+			fprintf( stderr, "Message Length:   %d\n", w->len );
+			fprintf( stderr, "\n" );
+			//DUMPF( 2, w->data, w->len );
+			//fprintf(stderr,"%s\n",fname( j->url ));
+			WRITEF( fname( j->url ), w->data, w->len ); 
+			free( w->data );
+			j++;
+		}
+	}
+	else {
+		const char bannerFmt[] = "%-50s\t%-6s\t%-6s\t%-6s\n";
+		const char argFmt[] = "%-50s\t%-6d\t%-6d\t%-6d\n";
+		char t[81];
+		memset( t, 0, sizeof(t) );
+		memset( t, 61 /* '=' */, 80 );
+		fprintf( stderr, bannerFmt, "Site", "Status", "Clen", "Mlen" );
+		fprintf( stderr, "%s\n", t );
+		   
+		Url *j = urls;
+		j++;
+		while ( j->url ) {
+			wwwResponse *w = &j->www;
+			fprintf( stderr, argFmt, j->url, w->status, w->clen, w->len );
+			WRITEF( fname( j->url ), w->data, w->len ); 
+			free( w->data );
+			j++;
+		}
+	}
 	
 	return 0;
 }

@@ -23,7 +23,8 @@
  *
  * Description
  * -----------
- * Baht is a tool to help index websites.  It can download HTML, parse HTML,  * download images, follow redirects and much more.
+ * Baht is a tool to help index websites.  It can download HTML, parse HTML,  
+ * download images, follow redirects and much more.
  *
  * Example Usage is something like:
  * <pre>
@@ -174,16 +175,15 @@ typedef struct lazy {
 struct why { int len; yamlList **list; };
 
 typedef struct wwwResponse {
-	int status, len;
+	int status, len, clen, ctype;
 	uint8_t *data;
 	char *redirect_uri;
-#if 0
-	const char *url;
-	const char *strippedHttps;
-	const char *statusLine;
-	const char *path;
-#endif
 } wwwResponse;
+
+typedef struct { 
+	int secure, port, fragment; 
+	char *addr; 
+} wwwType;
 
 typedef struct {
 	const char *name;	
@@ -200,6 +200,9 @@ enum pagetype {
 
 //An error string buffer (useless)
 char _errbuf[2048] = {0};
+
+//A pointer for downloads
+char *downloadDir = NULL;
 
 //Set verbosity globally until I get the time to restructure this app
 int verbose = 0;
@@ -225,6 +228,14 @@ const char *gumbo_types[] = {
 , "template"
 };
 
+const char sqlfmt[] = 
+	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );"
+#if 0
+	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
+#endif
+;
+
 const char *errMessages[] = {
 	NULL
 };
@@ -233,16 +244,6 @@ const char *errMessages[] = {
 const char *print_gumbo_type ( GumboNodeType t ) {
 	return gumbo_types[ t ];
 }
-
-
-//Filters
-#include "filters.c"
-const Filter filterSet[] = {
-	{ "asdf",       asdf_filter }
-, { "reverse" ,   rev_filter }
-, { NULL }
-};
-
 
 //Use this to return from functions
 int err_set ( int status, char *fmt, ... ) {
@@ -267,6 +268,42 @@ int err_print ( int status, char *fmt, ... ) {
 	fprintf( stderr, "\n" );
 	return status;
 }
+
+//write files with this
+int writeFd (const char *filename, uint8_t *b, int blen) {
+	int fd = open( filename, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IXUSR );
+	//automatically overwrite whatever may be there...
+	if ( fd == -1 ) {
+		fprintf( stderr, "%s: %s, %d - %s\n", __FILE__,__func__,__LINE__,strerror(errno) );
+		return 0;
+	}
+	//write ought to block, and I'm fine with that...
+	if ( write( fd, b, blen ) == -1 ) {
+		fprintf( stderr, "%s: %s, %d - %s\n", __FILE__,__func__,__LINE__,strerror(errno) );
+		return 0;
+	}
+	//close really doesn't need to be caught, but let's do it anyway
+	if ( close( fd ) == -1 ) {
+		fprintf( stderr, "%s: %s, %d - %s\n", __FILE__,__func__,__LINE__,strerror(errno) );
+		return 1;
+	}
+	return 1;
+}
+
+//Include the web handling logic
+#define _BAHTWEB
+#include "web.c"
+
+//Filters
+#include "filters.c"
+const Filter filterSet[] = {
+	{ "asdf",       asdf_filter }
+, { "reverse" ,   rev_filter }
+, { "download",   download_filter }
+, { "follow",     follow_filter }
+, { "checksum",   checksum_filter }
+, { NULL }
+};
 
 
 //Debugging stuff.
@@ -337,7 +374,8 @@ GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 
 
 //Load a page and write to buffer
-int load_page ( const char *file, char **dest, int *destlen, wwwResponse *w ) {
+//int load_page ( const char *file, char **dest, int *destlen, wwwResponse *w ) {
+int load_page ( const char *file, wwwResponse *w ) {
 
 	int fn, len=0;
 	struct stat sb;
@@ -369,15 +407,8 @@ int load_page ( const char *file, char **dest, int *destlen, wwwResponse *w ) {
 
 	//Set fake w
 	w->status = 200;
-#if 0
-	*dest = p;
-	*destlen = sb.st_size;
-	w->len = *destlen;
-	w->data = (uint8_t *)*dest;
-#else
 	w->len = sb.st_size;
 	w->data = (uint8_t *)p;
-#endif
 	w->redirect_uri = NULL;
 	return 1;
 }
@@ -1052,546 +1083,6 @@ Table *parse_lua ( const char *file ) {
 }
 
 
-//Write data to some kind of buffer with something
-static size_t WriteDataCallbackCurl (void *p, size_t size, size_t nmemb, void *ud) {
-	size_t realsize = size * nmemb;
-	Sbuffer *sb = (Sbuffer *)ud;
-	uint8_t *ptr = realloc( sb->buf, sb->len + realsize + 1 ); 
-	if ( !ptr ) {
-		fprintf( stderr, "No additional memory to complete request.\n" );
-		return 0;
-	}
-	sb->buf = ptr;
-	memcpy( &sb->buf[ sb->len ], p, realsize );
-	sb->len += realsize;
-	sb->buf[ sb->len ] = 0;
-	return realsize;
-}
-
-
-//Send requests to web pages.
-int load_www ( const char *p, char **dest, int *destlen, wwwResponse *r ) {
-#if 0
-	int c=0, sec, port;
-	const char *fp = NULL;
-
-	//Checking for secure or not...
-	if ( memcmp( "https", p, 5 ) == 0 ) {
-		sec = 1;
-		port = 443;
-		p = &p[8];
-		fp = &p[8];
-	}
-	else if ( memcmp( "http", p, 4 ) == 0 ) {
-		sec = 0;
-		port = 80;
-		p = &p[7];
-		fp = &p[7];
-	}
-	else {
-		sec = 0;
-		port = 80;
-		fp = p;
-	}
-
-	//NOTE: Although it is definitely easier to use CURL to handle the rest of the 
-	//request, dealing with TLS at C level is more complicated than it probably should be.  
-	//Do either an insecure request or a secure request
-	if ( !sec ) {
-		//Use libCurl
-		CURL *curl = NULL;
-		CURLcode res;
-		curl_global_init( CURL_GLOBAL_DEFAULT );
-		curl = curl_easy_init();
-		if ( curl ) {
-			Sbuffer sb = { 0, malloc(1) }; 	
-			curl_easy_setopt( curl, CURLOPT_URL, p );
-			curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, WriteDataCallbackCurl );
-			curl_easy_setopt( curl, CURLOPT_WRITEDATA, (void *)&sb );
-			curl_easy_setopt( curl, CURLOPT_USERAGENT, ua );
-			res = curl_easy_perform( curl );
-			if ( res != CURLE_OK ) {
-				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-				curl_easy_cleanup( curl );
-			}
-			//write(2,sb.buf,sb.len);
-			curl_global_cleanup();
-			*destlen = sb.len;
-			*dest = (char *)sb.buf;
-		}	
-	}
-#if 0
-	else {
-		fprintf( stderr, PROG "Can't handle TLS requests, yet!\n" );
-		exit( 0 );
-	}
-#else
-	else {
-		//Define all of this useful stuff
-		int err, ret, sd, ii, type, len;
-		unsigned int status;
-		Socket s = { .server   = 0, .proto    = "tcp" };
-		gnutls_session_t session;
-		memset( &session, 0, sizeof(gnutls_session_t));
-		gnutls_datum_t out;
-		gnutls_certificate_credentials_t xcred;
-		memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
-		char *desc = NULL;
-		uint8_t msg[ 32000 ] = { 0 };
-		char buf[ 4096 ] = { 0 }; 
-		char GetMsg[2048] = { 0 };
-		char rootBuf[ 128 ] = { 0 };
-		const char *root = NULL; 
-		const char *site = NULL; 
-		const char *urlpath = NULL;
-		const char *path = NULL;
-		int c=0;
-
-		//Initialize a message here
-		const char GetMsgFmt[] = 
-			"GET %s HTTP/1.1\r\n"
-			"Host: %s\r\n"
-			"User-Agent: %s\r\n\r\n"
-		;
-	
-		//Chop the URL very simply and crudely.
-		if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
-			path = "/";
-			root = p;
-		}
-		else {	
-			memcpy( rootBuf, p, c );
-			path = &p[ c ];
-			root = rootBuf;
-		}
-
-
-		//Pack a message
-		if ( port != 443 )
-			len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
-		else {
-			char hbbuf[ 128 ] = { 0 };
-			//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
-			snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
-			len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
-		}
-
-		//Do socket connect (but after initial connect, I need the file desc)
-		if ( RUN( !socket_connect( &s, root, port ) ) ) {
-			return err_set( 0, "%s\n", "Couldn't connect to site... " );
-		}
-
-		//GnuTLS
-		if ( RUN( !gnutls_check_version("3.4.6") ) ) { 
-			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
-		}
-
-		//Is this needed?
-		if ( RUN( ( err = gnutls_global_init() ) < 0 ) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-		/*
-		//Set client certs this way...
-		gnutls_certificate_set_x509_key_file( xcred, "cert.pem", "key.pem" );
-		*/	
-
-		//Initialize gnutls and set things up
-		if ( RUN( ( err = gnutls_init( &session, GNUTLS_CLIENT ) ) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, root, strlen(root)) ) < 0)) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_set_default_priority( session ) ) < 0) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-		
-		if ( RUN( ( err = gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, xcred )) <0) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		gnutls_session_set_verify_cert( session, root, 0 );
-		//fprintf( stderr, "s.fd: %d\n", s.fd );
-		gnutls_transport_set_int( session, s.fd );
-		gnutls_handshake_set_timeout( session, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT );
-
-		//This is ass ugly...
-		do {
-			RUN( ret = gnutls_handshake( session ) );
-		} while ( ret < 0 && gnutls_error_is_fatal( ret ) == 0 );
-
-		if ( RUN( ret < 0 ) ) {
-			fprintf( stderr, "ret: %d\n", ret );
-			if ( ret == GNUTLS_E_CERTIFICATE_VERIFICATION_ERROR ) {	
-				type = gnutls_certificate_type_get( session );
-				status = gnutls_session_get_verify_cert_status( session );
-				err = gnutls_certificate_verification_status_print( status, type, &out, 0 );
-				fprintf( stdout, "cert verify output: %s\n", out.data );
-				gnutls_free( out.data );
-				//jump to end, but I don't do go to
-			}
-			return err_set( 0, "%s\n", "Handshake failed: %s\n", gnutls_strerror( ret ));
-		}
-		else {
-			desc = gnutls_session_get_desc( session );
-			fprintf( stdout, "- Session info: %s\n", desc );
-			gnutls_free( desc );
-		}
-
-		if (RUN( ( err = gnutls_record_send( session, GetMsg, len ) ) < 0 ))
-			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
-
-		//This is a sloppy quick way to handle EAGAIN
-		int statter=0;
-		while ( statter < 5 ) {
-			if ( RUN( (ret = gnutls_record_recv( session, msg, sizeof(msg))) == 0 ) ) {
-				fprintf( stderr, " - Peer has closed the TLS Connection\n" );
-				//goto end;
-				statter = 5;
-			}
-			else if ( RUN( ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) ) {
-				fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-				//statter = 5;
-			}
-			else if ( RUN( ret < 0 ) ) {
-				fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-			}
-			else if ( RUN( ret > 0 ) ) {
-				//it looks like we MAY have received a packet here.
-				statter = 5;
-				break;
-			}
-
-			fprintf( stderr, "%d: %d\n", statter, ret );
-			statter++;
-		}
-
-		if ( ret > 0 ) {
-			fprintf( stdout, "Recvd %d bytes:\n", ret );
-			fflush( stdout );
-			write( 1, msg, ret );
-			fflush( stdout );
-			fputs( "\n", stdout );
-			len = ret;
-
-			//I don't know if I can always assume that this is complete.
-			//If the status is 200 OK, and Content-Length is there, keep reading
-			const char *ok[] = {
-				"HTTP/0.9 200 OK"
-			, "HTTP/1.0 200 OK"
-			, "HTTP/1.1 200 OK"
-			, "HTTP/2.0 200 OK"
-			, NULL
-			};
-			const char **lines = ok;
-
-			//This is a bad message
-			int stat = 0;
-			while ( *lines ) {
-				//fprintf(stderr,"%s\n",*lines);
-				if ( memcmp( msg, *lines, strlen(*lines) ) == 0 ) {
-					stat = 1;
-					char statWord[ 10 ] = {0};
-					memcpy( statWord, &msg[ 9 ], 3 );
-					r->status = atoi( statWord );
-					break;
-				}
-				lines++;
-			}
-
-			//This is a bad message?
-			if ( stat ) {
-				int pos = 0;
-				int r = 0;
-				int s = 0;
-				int len = 0;
-				char lenString[ 24 ] = {0};
-				uint8_t bmsg[ 327680 ] = {0};
-				int pl = 0;
-	
-				//
-				if ( (pos = memstrat( msg, "Content-Length", ret )) == -1 ) {
-					fprintf(stderr,"Error out, no length, somethings' wrong...\n" );
-				}
-				r = memchrat( &msg[ pos ], '\r', ret - pos );	
-				s = memchrat( &msg[ pos ], ' ', ret - pos );	
-				memcpy( lenString, &msg[ pos + (s+1) ], r - s );
-				len = atoi( lenString );
-				//r->len = len;
-
-				//Read everything
-				while ( len ) {
-					//Seems like the message needs to be malloc'd / realloc'd...
-					if ( RUN( (ret = gnutls_record_recv( session, &bmsg[ pl ], sizeof(bmsg))) == 0 ) ) {
-						fprintf( stderr, " - Peer has closed the TLS Connection\n" );
-						//goto end;
-					}
-					else if ( RUN( ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) ) {
-						fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
-						//goto end;
-					}
-					else if ( RUN( ret < 0 ) ) {
-						fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
-						//why would a session be invalidated?
-						//goto end;
-					}
-					else if ( RUN( ret > 0 ) ) {
-						//it looks like we MAY have received a packet here.
-						pl += ret;
-						len -= ret;
-						//fprintf(stderr,"%d left...\n", len); 
-					}
-				}
-			#if 0
-				//Quick dump
-				write( 2, msg, p );
-			#endif
-				//Set pointers 
-				*dest = malloc( pl + 1 ); 
-				*destlen = pl;
-				memcpy( *dest, bmsg, *destlen );
-			}
-		}
-
-		//At this point, I've got to get smart and write things into a structure.
-		#if 0
-		var a = {
-			status = int (only 200s should go)
-		, redirectUri = char (use this if it's a 302 or something, and try again)
-		, data = all of the packet data (the data to parse)
-		, len = int (length of response)
-		}
-		#endif
-
-		if (RUN((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 )) {
-			return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
-		}
-
-	}
-#endif
-end:
-	socket_close( &s );
-	gnutls_deinit( session );
-	gnutls_certificate_free_credentials( xcred );
-	gnutls_global_deinit();	
-#endif
-	return 1;
-}
-
-
-#if 0
-int loadwww2 ( const char *p, char **dest, int *destlen ) {
-	//Define all of this useful stuff
-	int err, ret, sd, ii, type, len;
-	unsigned int status;
-	Socket s = { .server   = 0, .proto    = "tcp" };
-	gnutls_session_t session;
-	memset( &session, 0, sizeof(gnutls_session_t));
-	gnutls_datum_t out;
-	gnutls_certificate_credentials_t xcred;
-	memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
-	char *desc = NULL;
-	uint8_t msg[ 32000 ] = { 0 };
-	char buf[ 4096 ] = { 0 }; 
-	char GetMsg[2048] = { 0 };
-	char rootBuf[ 128 ] = { 0 };
-	const char *root = NULL; 
-	const char *site = NULL; 
-	const char *urlpath = NULL;
-	const char *path = NULL;
-	int c=0, sec, port;
-
-	//A HEAD can be done first to check for any changes, maybe
-	//Then do a GET
-	const char GetMsgFmt[] = 
-		"GET %s HTTP/1.1\r\n"
-		"Host: %s\r\n"
-		"User-Agent: %s\r\n\r\n"
-	;
-
-	//You also need to chop 'http' and 'https' off of the thing
-	//if != 0, it's not secure
-
-//fprintf(stderr, "%s\n", p ); exit( 0 );
-
-	//Chop the URL very simply and crudely.
-	if (( c = memchrat( p, '/', strlen( p ) )) == -1 ) {
-		path = "/";
-		root = p;
-	}
-	else {	
-		memcpy( rootBuf, p, c );
-		path = &p[ c ];
-		root = rootBuf;
-	}
-
-	//Do socket connect (but after initial connect, I need the file desc)
-	if ( RUN( !socket_connect( &s, root, port ) ) ) {
-		return err_set( 0, "%s\n", "Couldn't connect to site... " );
-	}
-
-	//Pack a message
-	if ( port != 443 )
-		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, root, ua );
-	else {
-		char hbbuf[ 128 ] = { 0 };
-		//snprintf( hbbuf, sizeof( hbbuf ) - 1, "www.%s:%d", root, port );
-		snprintf( hbbuf, sizeof( hbbuf ) - 1, "%s:%d", root, port );
-		len = snprintf( GetMsg, sizeof(GetMsg) - 1, GetMsgFmt, path, hbbuf, ua );
-	}
-
-	if ( !sec ) {
-		;
-	}
-	else {
-		//GnuTLS
-		if ( RUN( !gnutls_check_version("3.4.6") ) ) { 
-			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
-		}
-
-		//Is this needed?
-		if ( RUN( ( err = gnutls_global_init() ) < 0 ) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_certificate_allocate_credentials( &xcred ) ) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_certificate_set_x509_system_trust( xcred )) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-		/*
-		//Set client certs this way...
-		gnutls_certificate_set_x509_key_file( xcred, "cert.pem", "key.pem" );
-		*/	
-
-		//Initialize gnutls and set things up
-		if ( RUN( ( err = gnutls_init( &session, GNUTLS_CLIENT ) ) < 0 )) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_server_name_set( session, GNUTLS_NAME_DNS, root, strlen(root)) ) < 0)) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		if ( RUN( ( err = gnutls_set_default_priority( session ) ) < 0) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-		
-		if ( RUN( ( err = gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, xcred )) <0) ) {
-			return err_set( 0, "%s\n", gnutls_strerror( err ));
-		}
-
-		gnutls_session_set_verify_cert( session, root, 0 );
-		//fprintf( stderr, "s.fd: %d\n", s.fd );
-		gnutls_transport_set_int( session, s.fd );
-		gnutls_handshake_set_timeout( session, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT );
-
-		//This is ass ugly...
-		do {
-			RUN( ret = gnutls_handshake( session ) );
-		} while ( ret < 0 && gnutls_error_is_fatal( ret ) == 0 );
-
-		if ( RUN( ret < 0 ) ) {
-			fprintf( stderr, "ret: %d\n", ret );
-			if ( ret == GNUTLS_E_CERTIFICATE_VERIFICATION_ERROR ) {	
-				type = gnutls_certificate_type_get( session );
-				status = gnutls_session_get_verify_cert_status( session );
-				err = gnutls_certificate_verification_status_print( status, type, &out, 0 );
-				fprintf( stdout, "cert verify output: %s\n", out.data );
-				gnutls_free( out.data );
-				//jump to end, but I don't do go to
-			}
-			return err_set( 0, "%s\n", "Handshake failed: %s\n", gnutls_strerror( ret ));
-		}
-		else {
-			desc = gnutls_session_get_desc( session );
-			fprintf( stdout, "- Session info: %s\n", desc );
-			gnutls_free( desc );
-		}
-
-		if (RUN( ( err = gnutls_record_send( session, GetMsg, len ) ) < 0 ))
-			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
-
-		//This is a sloppy quick way to handle EAGAIN
-		int statter=0;
-		while ( statter < 5 ) {
-			if ( RUN( (ret = gnutls_record_recv( session, msg, sizeof(msg))) == 0 ) ) {
-				fprintf( stderr, " - Peer has closed the TLS Connection\n" );
-				//goto end;
-				statter = 5;
-			}
-			else if ( RUN( ret < 0 && gnutls_error_is_fatal( ret ) == 0 ) ) {
-				fprintf( stderr, " Warning: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-				//statter = 5;
-			}
-			else if ( RUN( ret < 0 ) ) {
-				fprintf( stderr, " Error: %s\n", gnutls_strerror( ret ) );
-				//goto end;
-			}
-			else if ( RUN( ret > 0 ) ) {
-				//it looks like we MAY have received a packet here.
-				statter = 5;
-				break;
-			}
-
-			fprintf( stderr, "%d: %d\n", statter, ret );
-			statter++;
-		}
-
-		if ( ret > 0 ) {
-			fprintf( stdout, "Recvd %d bytes:\n", ret );
-			fflush( stdout );
-			write( 1, msg, ret );
-			fflush( stdout );
-			fputs( "\n", stdout );
-			len = ret;
-		}
-
-		if (RUN((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 )) {
-			return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
-		}
-	}
-
-	//Hey, here's our message
-	fprintf(stderr, "MESSAGE:\n" );
-	fprintf(stderr,"%d\n", len);
-	write( 1, msg, len );
-
-end:
-	socket_close( &s );
-	gnutls_deinit( session );
-	gnutls_certificate_free_credentials( xcred );
-	gnutls_global_deinit();	
-	return 1;
-}
-#endif
-
-
-//
-const char sqlfmt[] = 
-	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );"
-#if 0
-	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-#endif
-;
-
-
 //Option
 Option opts[] = {
 	//These ought to always be around
@@ -1599,6 +1090,7 @@ Option opts[] = {
  ,{ "-f", "--file",       "Get a file on the command line.", 's' }
  ,{ "-u", "--url",        "Check a URL from the WWW", 's' }
  ,{ "-o", "--output",     "Send output to this file", 's' }
+ ,{ "-t", "--tmp",        "Use this as a source folder for any downloads.", 's' }
 
 	//These will probably end up being deprecated.
 	//But make sense for scripts and AI
@@ -1847,13 +1339,13 @@ int main( int argc, char *argv[] ) {
 #endif
 
 	//Load the page from the web (or from file, but right now from web)
-	if ( pageType == PAGE_URL && !load_www( pageUrl, &b, &blen, &www ) ) {
+	if ( pageType == PAGE_URL && !load_www( pageUrl, &www ) ) {
 		err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
 		goto destroy;
 	}
 
 	//Load the page from file
-	if ( pageType == PAGE_FILE && !load_page( pageUrl, &b, &blen, &www ) ) {
+	if ( pageType == PAGE_FILE && !load_page( pageUrl, &www ) ) {
 		err_print( 0, "Loading page '%s' failed.\n", pageUrl );
 		goto destroy;
 	}
