@@ -1,4 +1,14 @@
 /*web.c - Handle any web requests*/
+
+/*Write defines here*/
+//#define SHOW_RESPONSE
+#define SHOW_REQUEST
+#define VERBOSE 
+#define WRITE_RESPONSE
+#define SSL_DEBUG
+#define INCLUDE_TIMEOUT
+/*Stop*/
+
 #ifndef SSL_DEBUG 
  #define SSLPRINTF( ... )
  #define EXIT(x)
@@ -42,13 +52,6 @@
  (c) || (fprintf(stderr, "%s: %d - %s\n", __FILE__, __LINE__, #c)? 0: 0)
 #endif
 
-//#define SHOW_RESPONSE
-#define SHOW_REQUEST
-#define VERBOSE 
-#define WRITE_RESPONSE
-#define SSL_DEBUG
-#define INCLUDE_TIMEOUT
-
 #ifndef VERBOSE
  #define VPRINTF( ... )
 #else
@@ -76,6 +79,10 @@ typedef struct wwwResponse {
 	char *redirect_uri;
 } wwwResponse;
 
+typedef struct { 
+	int secure, port, fragment; 
+	char *addr; 
+} wwwType;
 
 typedef struct stretchBuffer {
 	int len;
@@ -97,6 +104,47 @@ int err_set ( int status, char *fmt, ... ) {
 	return status;
 }
 
+#endif
+
+//base16 decoder
+int radix_decode( char *number, int radix ) {
+	const int hex[127] = {['0']=0,1,2,3,4,5,6,7,8,9,
+		['a']=10,['b']=11,['c']=12,13,14,15,['A']=10,11,12,13,14,15};
+	int tot=0, mult=1, len=strlen(number);
+	number += len; //strlen( digits ); 
+	while ( len-- ) {
+		//TODO: cut ascii characters not in a certain range...
+		tot += ( hex[ (int)*(--number) ] * mult);
+		mult *= radix;
+	}
+
+	return tot;
+}
+
+#if 0
+//16 ^ 0 = 1    = n * ((16^0) or 1) = n
+//16 ^ 1 = 16   = n * ((16^1) or 16) = n
+//16 ^ 2 = ...
+//printf("%d\n", n ); getchar();
+int main() {
+int p;
+struct intpair { char *c; int i; } tests[] = {
+ { NULL }
+,{ "fe",  254 }	
+,{ "c",   12	}
+,{ "77fe",30718 }
+,{ "87fe",34814 }
+#if 0
+,{ "87fecc1c",2281622556}
+#endif
+,{ NULL	}
+};
+struct intpair *a = tests;
+
+while ( (++a)->c ) 
+	printf("%d == %d = %s\n", 
+	p=radix_decode( a->c, 16 ),a->i,p==a->i?"true":"false");
+exit( 0);
 #endif
 
 //Write data to some kind of buffer with something
@@ -763,9 +811,11 @@ int write_to_file ( const char *filename, uint8_t *buf, int buflen ) {
 typedef struct { char *url; int i; wwwResponse www; } Url;
 Url urls[] = {
 	{ "dummy" }
+,	{ "https://jigsaw.w3.org/HTTP/ChunkedScript" }
 #if 1
 // #include "tests/urlHttps.c"
 #else
+, {	"https://www.google.com/search?client=opera&q=gnutls+error+string&sourceid=opera&ie=UTF-8&oe=UTF-8" }
 //these seem to work...
 , { "http://www.ramarcollins.com" }
 , { "https://cabarruscountycars.com/legacy" } //contains clen
@@ -781,7 +831,6 @@ Url urls[] = {
 
 
 int main (int argc, char *argv[]) {
-
 	//...
 	wwwResponse w;
 	char *buf = NULL;
