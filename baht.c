@@ -175,10 +175,11 @@ typedef struct lazy {
 struct why { int len; yamlList **list; };
 
 typedef struct wwwResponse {
-	int status, len, clen, ctype;
-	uint8_t *data;
+	int status, len, clen, ctype, chunked;
+	uint8_t *data, *body;
 	char *redirect_uri;
 } wwwResponse;
+
 
 typedef struct { 
 	int secure, port, fragment; 
@@ -188,6 +189,7 @@ typedef struct {
 typedef struct {
 	const char *name;	
 	int (*exec)( char *s, char **d, int * ); 
+	const char *retrkey;	
 	int isStatic;
 } Filter;
 
@@ -290,20 +292,10 @@ int writeFd (const char *filename, uint8_t *b, int blen) {
 	return 1;
 }
 
+
 //Include the web handling logic
 #define _BAHTWEB
 #include "web.c"
-
-//Filters
-#include "filters.c"
-const Filter filterSet[] = {
-	{ "asdf",       asdf_filter }
-, { "reverse" ,   rev_filter }
-, { "download",   download_filter }
-, { "follow",     follow_filter }
-, { "checksum",   checksum_filter }
-, { NULL }
-};
 
 
 //Debugging stuff.
@@ -353,6 +345,59 @@ void print_yamllist ( yamlList **yy ) {
 	}
 }
 
+
+void print_quad ( Quad *d ) {
+	fprintf( stderr, "fragment: %s\n", d->fragment ); 
+	fprintf( stderr, "complete: %s\n", d->complete ); 
+	fprintf( stderr, "node:     %d\n", d->node ); 
+	fprintf( stderr, "len:      %d\n", d->len ); 
+}
+
+
+//Filters
+#include "filters.c"
+const Filter filterSet[] = {
+	{ "asdf",       asdf_filter }
+, { "reverse" ,   rev_filter }
+, { "download",   download_filter, "source_url" /*","*/ }
+, { "follow",     follow_filter, "source_url" }
+, { "checksum",   checksum_filter }
+, { NULL }
+};
+
+
+//Void pointer array for the purposes of this thing
+typedef struct Ref { const char *key; void *value; } Ref;
+Ref **refs = NULL;
+int reflen = 0;
+
+
+//Get/set void pointers for the purpose of these filters
+Ref *filter_ref ( const char *udName, void *p ) {
+	if ( p ) { 	
+		Ref *a = malloc(sizeof(Ref));
+		a->key = udName;
+		a->value = p;
+		ADD_ELEMENT( refs, reflen, Ref *, a );
+		return a;
+	}
+	else {
+		Ref **r = refs;
+		for ( int i=0; i<reflen; i++  ) {
+			if ( strcmp( r[i]->key, udName ) == 0 ) {
+				return r[i];
+			}
+		}
+	}
+	return NULL;
+}
+
+void print_ref ( void ) {
+	Ref **r = refs;
+	for ( int i=0; i<reflen; i++  ) {
+		fprintf( stderr, "key: %s\n", r[i]->key );
+	}
+}
 
 //Find a specific tag within a nodeset 
 GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
@@ -819,10 +864,7 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 	while ( (*tn) ) {
 		char *k = (*tn)->k, *v = (*tn)->v;
 #if 0
-		if ( !v ) {
-			fprintf( stderr, "No target value for column %s\n", k );	
-		}
-		else {
+		if ( !v ) fprintf( stderr, "No target value for column %s\n", k );	
 #else
 		if ( v ) {
 #endif
@@ -885,6 +927,8 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 					while ( *filters ) {
 						//find the filter and run it
 						Filter *fltrs = (Filter *)filterSet;
+						//all the arguments should probably be parsed here...
+						//while ( ...  ) { ... }
 
 						while ( fltrs->name ) {
 							if ( strcmp( *filters, fltrs->name ) == 0 && fltrs->exec ) {
@@ -1145,7 +1189,7 @@ int main( int argc, char *argv[] ) {
 	(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);
 
 	//Define references
-	char *b = NULL, *sc = NULL, *yamlFile=NULL; 
+	char *b=NULL, *sc=NULL, *yamlFile=NULL; 
 	char *ps[] = { NULL, NULL };
 	char **p = ps;
 	int len=0;
@@ -1155,8 +1199,20 @@ int main( int argc, char *argv[] ) {
 	//Define and initailize these large structures.
 	wwwResponse www;
 	InnerProc pp;
+	refs = malloc( 1 );
 	memset( &www, 0, sizeof(wwwResponse) ); 
 	memset( &pp, 0, sizeof(InnerProc) ); 
+
+#if 0
+	int ph=300;
+	wwwResponse h;
+	h.status = 150;
+	filter_ref( "we_good", "hi" );
+	filter_ref( "there", &ph );
+	filter_ref( "here", &h );
+	print_ref ( );
+	exit( 0 );
+#endif
 
 	//Define all of that mess up here
 	uint8_t fkbuf[KEYBUFLEN] = { 0 }, rkbuf[KEYBUFLEN]={0};
@@ -1197,7 +1253,8 @@ int main( int argc, char *argv[] ) {
 		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
 			return err_print( 0, "No URL specified for dump." ); 
 		}
-		VPRINTF( "Loading and parsing URL: '%s'\n",pageUrl );
+		filter_ref( "source_url", pageUrl );
+		VPRINTF( "Loading and parsing URL: '%s'\n", pageUrl );
 	}
 
 	//Load an HTML file 

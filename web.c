@@ -2,9 +2,9 @@
 
 /*Write defines here*/
 //#define SHOW_RESPONSE
+//#define WRITE_RESPONSE
 #define SHOW_REQUEST
 #define VERBOSE 
-#define WRITE_RESPONSE
 #define SSL_DEBUG
 #define INCLUDE_TIMEOUT
 /*Stop*/
@@ -58,7 +58,7 @@
  #define VPRINTF( ... ) fprintf( stderr, __VA_ARGS__ ) ; fflush(stderr);
 #endif
 
-#define FPATH "html/"
+#define FPATH "tests/colombo/"
 
 #ifndef FPATH
  #define FPATH "./"
@@ -73,11 +73,13 @@
 	*(&ptr[ ptrListSize ]) = element; \
 	ptrListSize++;
 
+
 typedef struct wwwResponse {
-	int status, len, clen, ctype;
-	uint8_t *data;
+	int status, len, clen, ctype, chunked;
+	uint8_t *data, *body;
 	char *redirect_uri;
 } wwwResponse;
+
 
 typedef struct { 
 	int secure, port, fragment; 
@@ -106,6 +108,7 @@ int err_set ( int status, char *fmt, ... ) {
 
 #endif
 
+
 //base16 decoder
 int radix_decode( char *number, int radix ) {
 	const int hex[127] = {['0']=0,1,2,3,4,5,6,7,8,9,
@@ -120,6 +123,88 @@ int radix_decode( char *number, int radix ) {
 
 	return tot;
 }
+
+
+//Extracts the HTTP message body from the message
+int extract_body ( wwwResponse *r ) {
+	//when sending this, we have to skip the header
+	const char *t = "\r\n\r\n";
+	uint8_t *nsrc = r->data; 
+	uint8_t *rr = malloc(1);
+	int pos, tot=0, y=0, br = r->len;
+
+	if (( pos = memstrat( r->data, t, br ) ) == -1 ) {
+		fprintf( stderr, "carriage return not found...\n" ); 
+		return 0;
+	}
+
+	//Move ptrs and increment things, this is the start of the headers...
+	pos += 4;
+	nsrc += pos; 
+	br -= pos;
+	t += 2;
+	r->body = &r->data[ pos ];
+
+	//chunked
+	if ( !r->chunked ) {
+		return 1;
+	} 
+
+	//find the next \r\n, after reading the bytes
+	while ( 1 ) {
+		//define a buffer for size
+		//search for another \r\n, since this is the boundary
+		int sz, szText;
+		char tt[ 64 ];
+		memset( &tt, 0, sizeof(tt) );
+		if ((szText = memstrat( nsrc, t, br )) == -1 ) {
+			break;
+		}
+		memcpy( tt, nsrc, szText );
+		sz = radix_decode( tt, 16 );
+	
+		//move up nsrc, and get ready to read that
+		nsrc += szText + 2;
+		rr = realloc( rr, tot + sz );
+		memset( &rr[ tot ], 0, sz );
+		memcpy( &rr[ tot ], nsrc, sz );
+
+		//modify digits
+		nsrc += sz + 2, /*move up ptr + "\r\n" and "\r\n"*/
+		tot += sz,
+		br -= sz + szText + 2;
+
+		//this has to be finalized as well
+		if ( br == 0 ) {
+			break;
+		}
+	}
+
+#if 0
+	r->body = tt;
+	r->clen = tot;
+#else
+	//Trade pointers and whatnot
+	int ndSize = pos + strlen("\r\n\r\n") + tot;
+	uint8_t *newData = malloc( ndSize );
+	memset( newData, 0, ndSize );
+	memcpy( &newData[ 0 ], r->data, ndSize - tot );
+	memcpy( &newData[ ndSize - tot ], rr, tot );
+
+	//Free stuff
+	free( r->data );
+	free( rr  );
+
+	//Set stuff
+	r->data = NULL;	
+	r->data = newData;
+	r->len  = ndSize;
+	r->body = &newData[ ndSize - tot ];
+	r->clen = tot;
+#endif
+	return 1;
+}
+
 
 #if 0
 //16 ^ 0 = 1    = n * ((16^0) or 1) = n
@@ -243,6 +328,22 @@ int get_status (char *msg, int mlen) {
 }
 
 
+//???
+void print_www ( wwwResponse *r ) {
+	fprintf( stderr, "status: %d\n", r->status );
+	fprintf( stderr, "len:    %d\n", r->len );
+	fprintf( stderr, "clen:   %d\n", r->clen );
+	fprintf( stderr, "ctype:  %d\n", r->ctype );
+	fprintf( stderr, "chunked:%d\n", r->chunked );
+	fprintf( stderr, "redrUri:%s\n", r->redirect_uri	 );
+#if 1
+	fprintf( stderr, "\nbody\n" ); write( 2, r->body, 200 );
+	fprintf( stderr, "\ndata\n" ); write( 2, r->data, 400 );
+#endif
+}
+
+
+//...
 void select_www( const char *addr, wwwType *t ) {
 	//Checking for secure or not...
 	if ( memcmp( "https", addr, 5 ) == 0 ) {
@@ -268,6 +369,7 @@ void select_www( const char *addr, wwwType *t ) {
 }
 
 
+//Load webpages via HTTP/S
 int load_www ( const char *p, wwwResponse *r ) {
 	const char *fp = NULL;
 	wwwType t;
@@ -302,6 +404,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 	}
 #endif
 	int err, ret, sd, ii, type, len;
+	int chunked=0;
 	unsigned int status;
 	Socket s = { .server = 0, .proto = "tcp" };
 	gnutls_session_t session;
@@ -310,7 +413,9 @@ int load_www ( const char *p, wwwResponse *r ) {
 	gnutls_certificate_credentials_t xcred;
 	memset( &xcred, 0, sizeof(gnutls_certificate_credentials_t));
 	char *desc = NULL;
-	uint8_t msg[ 32000 ] = { 0 };
+	//uint8_t msg[ 32000 ] = { 0 };
+	//uint8_t *msg = malloc(1);
+	uint8_t *msg = NULL;
 	char buf[ 4096 ] = { 0 }; 
 	char GetMsg[2048] = { 0 };
 	char rootBuf[ 128 ] = { 0 };
@@ -488,8 +593,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 		//WE most likely will receive a very large page... so do that here...	
 		int first=0;
 		int crlf=-1;
-		int chunked=0;
-		uint8_t *msg = malloc(1);
+		msg = malloc(1);
 
 		while ( 1 ) {
 			uint8_t xbuf[ 4096 ];
@@ -509,8 +613,8 @@ int load_www ( const char *p, wwwResponse *r ) {
 				r->status = get_status( (char *)xbuf, blen );
 				r->clen = get_content_length( (char *)xbuf, blen );
 				r->ctype = get_content_type( (char *)xbuf, blen );
-				chunked = memstrat( xbuf, "Transfer-Encoding: chunked", blen ) > -1;
-				if ( chunked ) {
+				r->chunked = memstrat( xbuf, "Transfer-Encoding: chunked", blen ) > -1;
+				if ( r->chunked ) {
 					SSLPRINTF( "%s\n", "Chunked not implemented for HTTP" );
 					return err_set( 0, "%s\n", "Chunked not implemented for HTTP" );
 				}
@@ -528,7 +632,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 			r->len += blen;
 
 			//info about the session
-			SSLPRINTF( "recvd: %d , clen: %d , mlen: %d\n", r->len - crlf, r->clen, r->len );
+			//SSLPRINTF( "recvd: %d , clen: %d , mlen: %d\n", r->len - crlf, r->clen, r->len );
 
 			if ( !r->clen ) {
 				return err_set( 0, "%s\n", "No length specified, parser error!." );
@@ -539,7 +643,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 			}
 		}
 		//r->data = (uint8_t *)msg;
-		r->data = msg;
+		//r->data = msg;
 #endif
 	}
 	else {
@@ -621,10 +725,9 @@ int load_www ( const char *p, wwwResponse *r ) {
 			return err_set( 0, "%s\n", "GnuTLS 3.4.6 or later is required for this example." );	
 
 		//This is a sloppy quick way to handle EAGAIN
+		msg = malloc(1);
 		int first = 0;
-		int chunked = 0;
 		int crlf = -1;
-		char *msg = malloc(1);
 	#ifdef SSL_DEBUG
 		char **ptrarr = NULL;
 		int ptrarrlen = 0;
@@ -659,7 +762,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 					r->status = get_status( (char *)xbuf, ret );
 					r->clen = get_content_length( xbuf, ret );
 					r->ctype = get_content_type( (char *)xbuf, ret );
-					chunked = memstrat( xbuf, "Transfer-Encoding: chunked", ret ) > -1;
+					r->chunked = memstrat( xbuf, "Transfer-Encoding: chunked", ret ) > -1;
 					if ((crlf = memstrat( xbuf, "\r\n\r\n", ret )) == -1 ) {
 						SSLPRINTF( "%s\n", "No CRLF sequence found, response malformed." );
 						return err_set( 0, "%s\n", "No CRLF sequence found, response malformed." );
@@ -667,7 +770,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 		
 					//Increment the crlf by the length of "\r\n\r\n"	
 					crlf += 4;
-					if ( chunked ) {
+					if ( r->chunked ) {
 						char *m = &xbuf[ crlf ];
 						//parse the chunked length
 						int lenp = memstrat( m, "\r\n", ret - crlf );	
@@ -677,7 +780,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 						int sz = 0; //atoi( lenpxbuf );
 					}
 					
-					SSLPRINTF( "Got %s.",chunked ?"chunked message.":"message w/ content-length.");
+					SSLPRINTF( "Got %s.",r->chunked ?"chunked message.":"message w/ content-length.");
 					SSLPRINTF( "Got status: %d\n", r->status );
 					SSLPRINTF( "Got clen: %d\n", r->clen );
 					SSLPRINTF( "%s\n", "Initial message:" );
@@ -685,9 +788,10 @@ int load_www ( const char *p, wwwResponse *r ) {
 				}
 
 				//Finalize chunked messages.
-				if ( chunked && ret == 5 ) {
+				if ( r->chunked && ret == 5 ) {
 					if ( memcmp( xbuf, "0\r\n\r\n", 5 ) == 0 ) {
 						fprintf(stderr, "the last one came in" );
+fprintf( stderr, "%s, %d: my code ran.... but why stop?", __FILE__, __LINE__ ); 
 						break;
 					}
 					else {
@@ -695,6 +799,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 					} 
 				}
 			}
+fprintf( stderr, "%s, %d: my code ran.... but why stop?", __FILE__, __LINE__ ); 
 
 		#ifdef SSL_DEBUG
 			char *xmsg = malloc( ret + 1 );
@@ -712,7 +817,7 @@ int load_www ( const char *p, wwwResponse *r ) {
 			r->len += ret;
 
 			//If it's chunked, try sending a 100-continue
-			if ( chunked ) {
+			if ( r->chunked ) {
 				const char *cont = "HTTP/1.1 100 Continue\r\n\r\n";
 				//int err = gnutls_record_send( session, cont, strlen(cont)); 
 				fprintf(stderr, "%s (%d)\n", gnutls_strerror( err ), err );
@@ -730,10 +835,16 @@ int load_www ( const char *p, wwwResponse *r ) {
 			}
 		} /* end while */
 
-		if ((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 ) {
-			//return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
-		}
-	
+		int tries=0;
+		//why does this hang?
+		while (tries++ < 3 && (err = gnutls_bye(session, GNUTLS_SHUT_WR)) != GNUTLS_E_SUCCESS ) ;
+		//if ((err = gnutls_bye(session, GNUTLS_SHUT_RDWR)) < 0 ) {
+
+		if ( err != GNUTLS_E_SUCCESS ) {
+			return err_set( 0, "%s\n",  gnutls_strerror( ret ) );
+		} 	
+			
+	#if 0	
 	#ifdef SSL_DEBUG
 		//This worked...
 		int sz=0;
@@ -749,10 +860,12 @@ int load_www ( const char *p, wwwResponse *r ) {
 			write( 2, "' }\n", 4 );
 		}
 	#endif
-	
-		//Set refs
-		r->data = (uint8_t *)msg;
+	#endif
 	}
+
+	//Now, both requests ought to be done.  Set things here.
+	r->data = msg;
+	extract_body( r );
 	return 1;
 }
 
@@ -811,10 +924,31 @@ int write_to_file ( const char *filename, uint8_t *buf, int buflen ) {
 typedef struct { char *url; int i; wwwResponse www; } Url;
 Url urls[] = {
 	{ "dummy" }
+, { "http://www.ramarcollins.com" /* ... */ }
+, {	"https://www.httpwatch.com/httpgallery/chunked/chunkedimage.aspx?0.46782549706004284" }
+#if 0
+  { "https://amp.businessinsider.com/images/592f4169b74af41b008b5977-750-563.jpg" }
+#endif
+
+#if 0
+	//This is some script that I can use to test with memcmp
 ,	{ "https://jigsaw.w3.org/HTTP/ChunkedScript" }
-#if 1
+, { "//upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Nissan_GT-R_PROTO.jpg/220px-Nissan_GT-R_PROTO.jpg" }
+#endif
+
+#if 0
+	//These are all binary images... just write them out and call it a day
+, { "https://amp.businessinsider.com/images/592f4169b74af41b008b5977-750-563.jpg" }
+, { "https://i.gifer.com/1TM.gif" }
+, { "http://blogs.smithsonianmag.com/smartnews/files/2013/06/5008578082_2b5f4434bd_z.jpg" }
+#endif
+
+#if 0
 // #include "tests/urlHttps.c"
-#else
+#endif
+
+#if 0
+	//These are simple SSL pages
 , {	"https://www.google.com/search?client=opera&q=gnutls+error+string&sourceid=opera&ie=UTF-8&oe=UTF-8" }
 //these seem to work...
 , { "http://www.ramarcollins.com" }
@@ -825,6 +959,7 @@ Url urls[] = {
 , { "https://www.heritagerides.com/inventory.aspx" /*This one just doesn't work... (js block)*/ }
 , { "https://www.importmotorsportsnc.com/cars-for-sale" }
 #endif
+
 , { NULL }
 };
 
@@ -849,6 +984,7 @@ int main (int argc, char *argv[]) {
 			if ( !( j->i = load_www( j->url, /*&buf, &buflen,*/ &j->www ) ) ) {
 				fprintf( stderr, "Failed to load URL at '%s'\n", j->url );
 			}
+			fprintf( stderr, "Load URL at '%s'\n", j->url );
 		#endif
 			j++;
 		}
@@ -869,7 +1005,8 @@ int main (int argc, char *argv[]) {
 			fprintf( stderr, "\n" );
 			//DUMPF( 2, w->data, w->len );
 			//fprintf(stderr,"%s\n",fname( j->url ));
-			WRITEF( fname( j->url ), w->data, w->len ); 
+			//WRITEF( fname( j->url ), w->data, w->len ); 
+			WRITEF( fname( j->url ), w->body, w->clen ); 
 			free( w->data );
 			j++;
 		}
@@ -888,7 +1025,8 @@ int main (int argc, char *argv[]) {
 		while ( j->url ) {
 			wwwResponse *w = &j->www;
 			fprintf( stderr, argFmt, j->url, w->status, w->clen, w->len );
-			WRITEF( fname( j->url ), w->data, w->len ); 
+			//WRITEF( fname( j->url ), w->data, w->len ); 
+			WRITEF( fname( j->url ), w->body, w->clen ); 
 			free( w->data );
 			j++;
 		}
