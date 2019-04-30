@@ -1069,23 +1069,39 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 					//If a filter does not exist, no real reason to quit, but you can
 					while ( *filters ) {
 						Filter *fltrs = (Filter *)filterSet;
-					#if 0
-						FilterArgs args = { src, &block, &len, NULL, NULL };
-						args.ref = getYamlList( yamlList, args... );
-						args.list = getYamlList( yamlList, args... );
-					#else
-					#endif
+
+						//parse the args here
+						int co = memchrocc( *filters, '"', strlen( *filters ) );
+						char **args = NULL;
+						if ( co && (co % 2) == 0 ) {
+							//whew...
+							char *m = *filters;
+							int g, f = 0, argslen = 0;
+							m += g = memchrat( *filters, '"', strlen( *filters ) );
+							//*filters[ g ] = '\0'; //this assumes that there is a space, but...
+							args = malloc( 1 );
+
+							Mem super;
+							memset( &super, 0, sizeof(Mem) );	
+							while ( strwalk( &super, m, "\"" ) ) {
+								if ( f++ ) {
+									char dbuf[ 1024 ];
+									memcpy( dbuf, &m[super.pos], super.size );
+									ADD_ELEMENT( args, argslen, char *, strdup( dbuf ) );
+									memset( &dbuf, 0, sizeof(dbuf) ); 
+									f = 0;
+								}
+							}
+							ADD_ELEMENT( args, argslen, char *, NULL );
+							//char **sa = args;while ( *sa ) { fprintf( stderr, "arg%d: %s\n", f++, *sa ); sa++; }
+						}
 
 						//find the filter and run it
 						while ( fltrs->name ) {
 							if ( strcmp( *filters, fltrs->name ) == 0 && fltrs->exec ) {
 								char *block = NULL;
 								int len = 0;
-							#if 0
-								int status = fltrs->exec( &args );
-							#else
-								int status = fltrs->exec( src, &block, &len, NULL, NULL );
-							#endif
+								int status = fltrs->exec( src, &block, &len, NULL, args );
 								free( src );
 								src = malloc( len );	
 								memset( src, 0, len );
@@ -1093,7 +1109,6 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 							}
 							fltrs++;
 						}
-
 						filters++;	
 					}
 

@@ -1,6 +1,6 @@
 //filters.c
 //Just return the letters 'asdf'
-int asdf_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
+int asdf_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
 	const int len = 5;
 	*dest = malloc( len );
 	memset( *dest, 0, len );
@@ -11,7 +11,7 @@ int asdf_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y 
 
 
 //Return the block in reverse 
-int rev_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
+int rev_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
 	int i = 0;
 	int len = strlen( block );
 	char *b = &block[ len - 1 ];
@@ -26,7 +26,7 @@ int rev_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y )
 
 
 //download (download assets)
-int download_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
+int download_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
 	wwwResponse http;
 	wwwType t;
 	char *dir = filter_ref( "download_dir", NULL )->value;
@@ -87,7 +87,7 @@ int download_filter ( char *block, char **dest, int *destlen, void *p, yamlList 
 
 
 //follow (this should attempt to follow redirects)
-int follow_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
+int follow_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
 	//this needs another run of baht, and then still needs to do things
 	wwwResponse http;
 	wwwType t;
@@ -138,11 +138,38 @@ int follow_filter ( char *block, char **dest, int *destlen, void *p, yamlList **
 
 
 //checksum (generate a checksum from either an image or binary)
-int checksum_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
+int checksum_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
 	*dest = block;
 	*destlen = strlen(block);
 	return 1;
 }
+
+
+//return the left of a string with some characters
+int lstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+	*dest = block;
+	*destlen = strlen(block);
+	return 1;
+}
+
+
+//return the right of a string with some characters
+int rstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+	*dest = block;
+	*destlen = strlen(block);
+	return 1;
+}
+
+
+//return the middle of a string with some characters
+int mstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+	*dest = block;
+	*destlen = strlen(block);
+	return 1;
+}
+
+
+
 
 
 
