@@ -346,6 +346,7 @@ void print_www ( wwwResponse *r ) {
 //...
 void select_www( const char *addr, wwwType *t ) {
 	//Checking for secure or not...
+	//you can extract the root from here...
 	if ( memcmp( "https", addr, 5 ) == 0 ) {
 		t->secure = 1;
 		t->port = 443;
@@ -433,6 +434,9 @@ int load_www ( const char *p, wwwResponse *r ) {
 		path = &p[ c ];
 		root = rootBuf;
 	}
+
+	//Add the source URL to our mysterious chain
+	filter_ref( "source_url", (void *)strdup( root ) );
 
 	//HEADs and GETs
 	const char GetMsgFmt[] = 

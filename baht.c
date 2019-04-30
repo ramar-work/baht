@@ -172,7 +172,11 @@ typedef struct lazy {
 	short ind, len;//, *arr;
 } oCount; 
 
-struct why { int len; yamlList **list; };
+typedef struct why { 
+	int len; 
+	yamlList **list; 
+	yamlList *ptr;  //when looping this can be used to signify things
+} yamlSet;
 
 typedef struct wwwResponse {
 	int status, len, clen, ctype, chunked;
@@ -188,10 +192,20 @@ typedef struct {
 
 typedef struct {
 	const char *name;	
-	int (*exec)( char *s, char **d, int * ); 
+	int (*exec)( char *s, char **d, int *, void *, yamlList ** ); 
 	const char *retrkey;	
 	int isStatic;
 } Filter;
+
+//Void pointer array for the purposes of this thing
+typedef struct Ref { const char *key; void *value; } Ref;
+
+typedef struct {
+	char *block, **dest;
+	int  *destlen;
+	Ref **ref;
+	yamlList **y;	
+} FilterArgs;
 
 enum pagetype {
 	PAGE_NONE
@@ -200,11 +214,20 @@ enum pagetype {
 , PAGE_CMD
 };
 
+//Global pointer for the purposes of adding to this thing.
+Ref **refs = NULL;
+
+//Another global pointer to make it easier to use this
+Ref nullref = { NULL, NULL };
+
+//Length of the thing
+int reflen = 0;
+
 //An error string buffer (useless)
 char _errbuf[2048] = {0};
 
 //A pointer for downloads
-char *downloadDir = NULL;
+const char download_dir[] = ".";
 
 //Set verbosity globally until I get the time to restructure this app
 int verbose = 0;
@@ -271,6 +294,51 @@ int err_print ( int status, char *fmt, ... ) {
 	return status;
 }
 
+
+//read files with this
+int readFd (const char *filename, uint8_t **b, int *blen) {
+
+	int fd, len;
+	struct stat sb;
+	memset( &sb, 0, sizeof( struct stat ) );
+	
+	//TODO: None of these should be fatal, but for ease they're going to be
+	//Read file to memory
+	if ( stat( filename, &sb ) == -1 ) {
+		return err_set( 0, "%s", strerror( errno ) );
+	}
+
+	//Open the filename
+	if ( (fd = open( filename, O_RDONLY )) == -1 ) {
+		return err_set( 0, "%s", strerror( errno ) );
+	}
+
+	//Allocate a buffer big enough to just write to memory.
+	if ( !(*b = malloc( sb.st_size + 10 )) ) {
+		return err_set( 0, "%s", strerror( errno ) );
+	}
+
+	memset( *b, 0, sb.st_size+10 );	
+
+	//Read the filename into buffer	
+	if ( (len = read( fd, *b, sb.st_size )) == -1 ) {
+		free( *b );
+		return err_set( 0, "%s", strerror( errno ) );
+	}
+
+	//Close the filename?
+	if ( close( fd ) == -1 ) {
+		free( *b );
+		return err_set( 0, "%s\n", strerror( errno ) );
+	}
+
+	if ( blen ) {
+		*blen = len;
+	}
+	return 1;
+}
+
+
 //write files with this
 int writeFd (const char *filename, uint8_t *b, int blen) {
 	int fd = open( filename, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IXUSR );
@@ -292,10 +360,6 @@ int writeFd (const char *filename, uint8_t *b, int blen) {
 	return 1;
 }
 
-
-//Include the web handling logic
-#define _BAHTWEB
-#include "web.c"
 
 
 //Debugging stuff.
@@ -338,8 +402,8 @@ void print_tlist ( Table **tlist, int len, Table *ptr ) {
 }
 
 
-void print_yamllist ( yamlList **yy ) {
-	while ( (*yy)->k ) {
+void print_yamlList ( yamlList **yy ) {
+	while ( *yy && (*yy)->k ) {
 		fprintf( stderr, "%s - %s\n", (*yy)->k, (*yy)->v );
 		yy++;
 	}
@@ -352,24 +416,6 @@ void print_quad ( Quad *d ) {
 	fprintf( stderr, "node:     %d\n", d->node ); 
 	fprintf( stderr, "len:      %d\n", d->len ); 
 }
-
-
-//Filters
-#include "filters.c"
-const Filter filterSet[] = {
-	{ "asdf",       asdf_filter }
-, { "reverse" ,   rev_filter }
-, { "download",   download_filter, "source_url" /*","*/ }
-, { "follow",     follow_filter, "source_url" }
-, { "checksum",   checksum_filter }
-, { NULL }
-};
-
-
-//Void pointer array for the purposes of this thing
-typedef struct Ref { const char *key; void *value; } Ref;
-Ref **refs = NULL;
-int reflen = 0;
 
 
 //Get/set void pointers for the purpose of these filters
@@ -389,15 +435,57 @@ Ref *filter_ref ( const char *udName, void *p ) {
 			}
 		}
 	}
-	return NULL;
+	return &nullref;
 }
+
 
 void print_ref ( void ) {
 	Ref **r = refs;
 	for ( int i=0; i<reflen; i++  ) {
-		fprintf( stderr, "key: %s\n", r[i]->key );
+		fprintf( stderr, "key: %s, ", r[i]->key );
+		fprintf( stderr, "value: %s\n", r[i]->value );
 	}
 }
+
+
+
+//this will crash if you don't use malloc'd strings (I wonder if [] would work)
+char *strreplace( char **affect, char *find, char *rep ) {
+	char *ff = *affect;
+	while ( *ff ) { 	
+		//TODO: Support multiple characters.  
+		//TODO: Supporting removal is also good, but might need to happen elsewhere... especially since I don't plan on using a copy.
+		*ff = ( *ff == *find ) ? *rep : *ff;
+		ff++; 
+	}
+	return *affect;
+}
+#if 0
+char *bacon = "asdfg\none, two, three\nyes";
+char *ib = strdup( bacon );
+strreplace( &ib, "\n", "," );
+fprintf(stderr,"tmp: %s\n", ib );
+exit(0);
+#endif
+
+
+//Include the web handling logic
+#define _BAHTWEB
+#include "web.c"
+
+
+//Filters
+#include "filters.c"
+const Filter filterSet[] = {
+	{ "asdf",       asdf_filter }
+, { "reverse" ,   rev_filter }
+, { "download",   download_filter, "source_url" /*","*/ }
+, { "follow",     follow_filter, "source_url" }
+, { "checksum",   checksum_filter }
+, { NULL }
+};
+
+
 
 //Find a specific tag within a nodeset 
 GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
@@ -805,7 +893,8 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 //why would I do this?  because it works here...
 int key_from_ht_exec ( LiteKv *kv, int i, void *p ) {
 	
-	struct why *w = (struct why *)p;
+	//struct why *w = (struct why *)p;
+	yamlSet *w = (yamlSet *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
 
 	//DPRINTF( "%d %p\n", w->len, y );
@@ -829,7 +918,7 @@ int key_from_ht_exec ( LiteKv *kv, int i, void *p ) {
 
 //Assuming I use a hash table, I want to create a simple array of keys and values
 yamlList **keys_from_ht ( Table *t ) {
-	struct why w = { 0, NULL };
+	yamlSet w = { 0, NULL };
 	int h=0; 
 	//Find the elements key first
 	if (( h = lt_geti( t, "elements" )) == -1 ) {
@@ -842,16 +931,70 @@ yamlList **keys_from_ht ( Table *t ) {
 		VPRINTF( "Something failed...\n" );
 	}
 
-	#if 0
-	//TODO: What is the point of this?
-	for ( int i=0; i<w.len; i++ ) {
-		yamlList *y = w.list[ i ];
-		//fprintf( stderr, "%s = %s\n", y->k, y->v );
+	ADD_ELEMENT( w.list, w.len, sizeof( yamlList * ), NULL );
+	return w.list;
+}
+
+
+//chop to yamlList, removing all characters in remove...
+yamlList ** string_to_yamlList ( const char *tmp, const char *delims, const char *rem ) {
+
+	int f=0; 
+	yamlSet w = { 0, NULL };
+	yamlList *tp = NULL;
+	
+	Mem set;
+	memset( &set, 0, sizeof(Mem) );	
+
+	if ( !(w.list = malloc(sizeof(yamlList **)) ) ) {
+		return NULL;
 	}
-	#endif
+
+	while ( strwalk( &set, tmp, delims ) ) {
+		char buf[ 4096 ];
+		memset( &buf, 0, sizeof(buf) );
+
+		if ( !f++ ) {
+			tp = malloc(sizeof(yamlList));
+			memset( tp, 0, sizeof(yamlList));
+			memcpy( buf, &tmp[ set.pos ], set.size );
+			tp->k = strdup( buf );
+		}
+		else {
+			memcpy( buf, &tmp[ set.pos ], set.size );
+			tp->v = strdup( buf );
+			ADD_ELEMENT( w.list, w.len, sizeof( yamlList * ), tp ); 
+			f = 0;
+		}
+	}
 
 	ADD_ELEMENT( w.list, w.len, sizeof( yamlList * ), NULL );
 	return w.list;
+}
+#if 0
+const char *string="a,b|c,d|e,f";
+yamlList **y = string_to_yamlList( string, ",|", NULL );
+print_yamllist( y );
+exit( 0 );
+#endif
+
+
+void add_to_yamlList ( yamlList **y, const char *key, const char *value ) {
+	//move w.len back one
+}
+
+
+void find_in_yamlList ( yamlList **y, const char *key ) {
+	0;
+}
+
+void find_in_yamlset ( yamlSet *y, const char *key ) {
+	0;
+}
+
+
+void free_yamlset ( yamlSet *y ) {
+	0;
 }
 
 
@@ -925,16 +1068,24 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 
 					//If a filter does not exist, no real reason to quit, but you can
 					while ( *filters ) {
-						//find the filter and run it
 						Filter *fltrs = (Filter *)filterSet;
-						//all the arguments should probably be parsed here...
-						//while ( ...  ) { ... }
+					#if 0
+						FilterArgs args = { src, &block, &len, NULL, NULL };
+						args.ref = getYamlList( yamlList, args... );
+						args.list = getYamlList( yamlList, args... );
+					#else
+					#endif
 
+						//find the filter and run it
 						while ( fltrs->name ) {
 							if ( strcmp( *filters, fltrs->name ) == 0 && fltrs->exec ) {
 								char *block = NULL;
 								int len = 0;
-								int status = fltrs->exec( src, &block, &len );
+							#if 0
+								int status = fltrs->exec( &args );
+							#else
+								int status = fltrs->exec( src, &block, &len, NULL, NULL );
+							#endif
 								free( src );
 								src = malloc( len );	
 								memset( src, 0, len );
@@ -1135,6 +1286,7 @@ Option opts[] = {
  ,{ "-u", "--url",        "Check a URL from the WWW", 's' }
  ,{ "-o", "--output",     "Send output to this file", 's' }
  ,{ "-t", "--tmp",        "Use this as a source folder for any downloads.", 's' }
+ ,{ NULL, "--filter-opts","Filter options",'s' }
 
 	//These will probably end up being deprecated.
 	//But make sense for scripts and AI
@@ -1179,9 +1331,10 @@ struct Cmd {
 #endif
 
 
+
+
 //Much like moving through any other parser...
 int main( int argc, char *argv[] ) {
-
 	//Show the version and compilation date
 	SHOW_COMPILE_DATE();
 
@@ -1222,8 +1375,30 @@ int main( int argc, char *argv[] ) {
 	int kylen=0; 
 	int pageType=0;
 
+	yamlList **fy = NULL;
+
+
 	//Set verbosity
 	verbose = opt_set( opts, "--verbose" ); 
+
+	//Set any filter options here
+	if ( opt_set( opts, "--filter-opts" ) ) {
+		//chop the list and start adding things
+		//prefix, suffix, transform, etc can all be thrown in here
+		char *filteropts = opt_get( opts, "--filter-opts" ).s;
+		yamlList **xy = string_to_yamlList( filteropts, "=,", NULL );
+		print_yamlList( xy ); 
+		while ( *xy && (*xy)->k ) {
+			char *aa = strdup( (*xy)->v );
+			filter_ref( (*xy)->k, (void *)aa );
+			xy++;
+		}
+	}
+
+	//After setting filter options, we need to check for a couple of defaults...
+	if ( !opt_set( opts, "--filter-opts" ) || !filter_ref( "download_dir", NULL ) ) {
+		filter_ref( "download_dir", (char *)download_dir );
+	}
 
 	//Load a Lua file
 	if ( opt_set( opts, "--load" ) ) {
@@ -1253,7 +1428,6 @@ int main( int argc, char *argv[] ) {
 		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
 			return err_print( 0, "No URL specified for dump." ); 
 		}
-		filter_ref( "source_url", pageUrl );
 		VPRINTF( "Loading and parsing URL: '%s'\n", pageUrl );
 	}
 
@@ -1284,6 +1458,7 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 
+
 #if 1
 	//Also chop the nodes from here	
 	if ( opt_set(opts, "--nodes") || opt_set(opts, "--nodefile") ) { 
@@ -1300,9 +1475,15 @@ int main( int argc, char *argv[] ) {
 					tmp = (char *)args[ i ];
 				//TODO: This is ridiculous...
 				else {
-					struct stat sb = {0};
 					const char *file = args[ i ];
 					char *p = NULL;
+#if 0
+					if ( !readFd( file, (uint8_t **)&p, NULL ) ) {
+						err_print( 0, "%s", "something bad happened at readFd." );
+						goto destroy;
+					}
+#else
+					struct stat sb = {0};
 					int fn = 0;
 	
 					//TODO: None of these should be fatal, but for ease they're going to be
@@ -1339,7 +1520,7 @@ int main( int argc, char *argv[] ) {
 						err_print( 0, "%s\n", strerror( errno ) );
 						goto destroy;
 					}
-
+#endif
 					tmp = p;
 				}
 		
@@ -1352,16 +1533,24 @@ int main( int argc, char *argv[] ) {
 
 				//Now walk through the memory.
 				if ( tmp ) {
-					Mem set; //TODO: This must not be / is not thread safe... fix it
-					int f=0; 
-					yamlList *tp = NULL;
-					memset(&set,0,sizeof(Mem));
-
+#if 0
+					strreplace( &tmp, "\n", "," );
+fprintf(stderr,"tmp: %s\n", tmp );
+					//string_to_yamlList( tmp, delims, NULL );
+#else
 					//turn text blocks into continuous strings (get rid of \n and use ',')
 					char *ff = tmp;
 					while ( *ff ) { *ff = (*ff == '\n') ? ',' : *ff; ff++; }
 					//this could be U/B...
 					ff--, *ff = '\0';
+
+
+
+					Mem set; //TODO: This must not be / is not thread safe... fix it
+					int f=0; 
+					yamlList *tp = NULL;
+					memset(&set,0,sizeof(Mem));
+					
 				
 					while ( strwalk( &set, tmp, delims ) ) {
 						char buf[ 1024 ];
@@ -1379,6 +1568,7 @@ int main( int argc, char *argv[] ) {
 							f = 0;
 						}
 					}
+#endif
 				}
 			}
 		}
@@ -1406,6 +1596,18 @@ int main( int argc, char *argv[] ) {
 		err_print( 0, "Loading page '%s' failed.\n", pageUrl );
 		goto destroy;
 	}
+
+#if 0
+fprintf(stderr,"%s: %d\n", __FILE__, __LINE__ );
+print_ref( );
+fprintf(stderr,"%s: %d\n", __FILE__, __LINE__ );
+Ref *a = filter_ref( "source_url", NULL );
+fprintf( stderr, "%s\n", (char *)a->value );
+Ref *c = filter_ref( "download_dir", NULL );
+fprintf( stderr, "%s\n", c->value );
+exit( 0 );
+#endif
+
 
 #if 0
 	//Load the page via a command 
@@ -1558,7 +1760,6 @@ int main( int argc, char *argv[] ) {
 	//We can stream to a number of formats, and should anticipate that.
 	//CSV, SQL, even Excel (or at least ODF) ought to be doable.
 	//That said, this looks like a job for a Function Pointer...
-
 	for ( int i=0; i<pp.tlistLen; i++ ) {
 		Table *tHtmllite = pp.tlist[ i ];
 

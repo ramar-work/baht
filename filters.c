@@ -1,7 +1,6 @@
 //filters.c
-
 //Just return the letters 'asdf'
-int asdf_filter ( char *block, char **dest, int *destlen ) {
+int asdf_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
 	const int len = 5;
 	*dest = malloc( len );
 	memset( *dest, 0, len );
@@ -12,7 +11,7 @@ int asdf_filter ( char *block, char **dest, int *destlen ) {
 
 
 //Return the block in reverse 
-int rev_filter ( char *block, char **dest, int *destlen ) {
+int rev_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
 	int i = 0;
 	int len = strlen( block );
 	char *b = &block[ len - 1 ];
@@ -27,47 +26,48 @@ int rev_filter ( char *block, char **dest, int *destlen ) {
 
 
 //download (download assets)
-int download_filter ( char *block, char **dest, int *destlen ) {
+int download_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
 	wwwResponse http;
 	wwwType t;
-	char *dir = ( downloadDir ) ? downloadDir : ".";
+	char *dir = filter_ref( "download_dir", NULL )->value;
+	char *root = filter_ref( "source_url", NULL )->value;
 	char *fname = rand_alnum( 24 );
+	char *fb = NULL;
 
-	//???
-	char fb[ 2048 ];
-	memset( &fb, 0, sizeof(fb) );
-	memcpy( fb, dir, strlen(dir) );
-	memcpy( &fb[ strlen(dir) ], "/", 1 );
-
-	//extract the block and work
+	//negotiate the url
 	select_www( block, &t );
-	if ( t.fragment ) {
-		//turn the block into a full url using the source, you can't do this without a void *
-	}
+	char *protocol = ( t.secure ) ? "https://" : "http://";
+	fb = ( !t.fragment ) ? block : strcmbd( "", protocol, root, block );
 
 	//...
+#if 0
 	fprintf( stderr, "sec:  %d\n", t.secure );
 	fprintf( stderr, "port: %d\n", t.port );
 	fprintf( stderr, "frag: %d\n", t.fragment );
 	//memcpy( &fb[ strlen(dir) + 1 ], block, strlen(block) ); //hmm, this is a little unsafe...
-#if 1
-	fprintf(stderr,"Running %s, %s: %d with string '%s'\n", __func__,__FILE__,__LINE__,block);
+	fprintf(stderr,"Running %s, %s: %d with string '%s'\n", __func__,__FILE__,__LINE__,fb);
 	fprintf(stderr,"press enter to continue...\n" );
 	getchar();
 #endif
 
 	//free the things in http that the things do the things... yep
-	if ( !load_www( block, &http ) ) {
+	if ( !load_www( fb, &http ) ) {
 		fprintf( stderr,"load_www() failed.\n" );
+		( t.fragment ) ? free( fb ) : 0;
 		*dest = "", *destlen = 1;
 		return 1;
 	}
+
+	//free the full http address
+	if ( t.fragment ) { 
+		free( fb );
+	} 
 
 	//only move forward if http.status == 200
 	if ( http.status != 200 ) {
 		fprintf( stderr,"status not 200 OK, download failed.\n" );
 		*dest = "", *destlen = 1;
-		return 1;
+		return 0;
 	}
 
 	//write out files
@@ -87,23 +87,26 @@ int download_filter ( char *block, char **dest, int *destlen ) {
 
 
 //follow (this should attempt to follow redirects)
-int follow_filter ( char *block, char **dest, int *destlen ) {
+int follow_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
 	//this needs another run of baht, and then still needs to do things
 	wwwResponse http;
 	wwwType t;
-	memset(&http,0,sizeof(wwwResponse));
-	memset(&t,0,sizeof(wwwType));
-	//check the url, start w/ '/' or 'h' (or 'w')
-	//is this even a url? if it's not, this is a fail
-fprintf(stderr,"URL :=> %s\n", block);
+	memset( &http, 0, sizeof(wwwResponse) );
+	memset( &t, 0, sizeof(wwwType) );
+	char *dir = filter_ref( "download_dir", NULL )->value;
+	char *root = filter_ref( "source_url", NULL )->value;
+	char *fb = NULL;
+	char *protocol = NULL;
+
+	//negotiate the url
 	select_www( block, &t );
-	if ( t.fragment ) {
-		//turn the block into a full url using the source, you can't do this without a void *
-	}
+	protocol = ( t.secure ) ? "https://" : "http://";
+	fb = ( !t.fragment ) ? block : strcmbd( "", protocol, root, block );
 
 	//Now load the page
 	if ( !load_www( block, &http ) ) {
 		fprintf( stderr,"load_www() failed.\n" );
+		( t.fragment ) ? free( fb ) : 0;
 		*dest = "", *destlen = 1;
 		return 1;
 	}
@@ -111,19 +114,31 @@ fprintf(stderr,"URL :=> %s\n", block);
 	//check the status, if it's a redirect, it should be done from load_www
 	if ( http.status != 200 ) {
 		fprintf( stderr,"status not 200 OK, download failed.\n" );
+		( t.fragment ) ? free( fb ) : 0;
 		*dest = "", *destlen = 1;
 		return 1;
 	}
 
+#if 1
+	//write the file for test purposes
+	char *fname = rand_alnum( 24 );
+	if ( !writeFd( fname, http.body, http.clen ) ) {
+		( t.fragment ) ? free( fb ) : 0;
+		*dest = "", *destlen = 1;
+		return 0;
+	}
+#endif
+
 	//return things
 	*dest = (char *)http.body;
 	*destlen = http.clen;
+	( t.fragment ) ? free( fb ) : 0;
 	return 1;
 }
 
 
 //checksum (generate a checksum from either an image or binary)
-int checksum_filter ( char *block, char **dest, int *destlen ) {
+int checksum_filter ( char *block, char **dest, int *destlen, void *p, yamlList **y ) {
 	*dest = block;
 	*destlen = strlen(block);
 	return 1;
