@@ -145,18 +145,64 @@ int checksum_filter ( char *block, char **dest, int *destlen, void *p, const cha
 }
 
 
-//return the left of a string with some characters
-int lstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
-	*dest = block;
-	*destlen = strlen(block);
+//return the right of a string with some characters
+int rstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+	//this function should only have one argument,
+	//even better yet if it's a macro, but I'm not sure that can happen the way I'm doing it
+	//fprintf( stderr, "\narg @rstr: %c\n", **y );
+
+	//increment, and find the character
+	//while ( *block && *(block++) != **y ) nt--;
+	//*dest = (!nt) ? &block[0] : block;
+	//*destlen = strlen( (!nt) ? &block[0] : block ); 
+	int mlen=0, len=strlen(block);
+	while ( *block ) {
+		if (*block == **y) { 
+			block++, mlen++;
+			break;
+		}
+		block++, mlen++;
+	}
+
+	if ( *block ) {
+		block -= mlen;
+	}
+
+	//copy
+	*destlen = len -= mlen;
+	*dest = malloc( len );
+	memset( *dest, 0, len );
+	memcpy( *dest, &block[ mlen ], len );
+//fprintf(stderr,"%d, %d\n", mlen, len ); write(2,*dest,len);
+	//...?
+	memset( block, 0, len + mlen );	
 	return 1;
 }
 
 
-//return the right of a string with some characters
-int rstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
-	*dest = block;
-	*destlen = strlen(block);
+//return the left of a string with some characters
+int lstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+	//fprintf( stderr, "\narg @lstr: %c\n", **y );
+	int mlen=0, len = strlen(block);
+
+	while ( *block ) {
+		if (*block == **y) { 
+			break;
+		}
+		block++, mlen++;
+	}
+
+	if ( *block ) {
+		block -= mlen;
+		memset( &block[mlen], 0, strlen(block) - len );
+	}
+
+	//you can do as much memory stuff as you want...
+	*destlen = mlen;
+	*dest = malloc( mlen );
+	memset( *dest, 0, mlen );
+	memcpy( *dest, block, *destlen );
+	//write(2,*dest,*destlen);
 	return 1;
 }
 

@@ -192,7 +192,7 @@ typedef struct {
 
 typedef struct {
 	const char *name;	
-	int (*exec)( char *s, char **d, int *, void *, yamlList ** ); 
+	int (*exec)( char *s, char **d, int *, void *, const char ** ); 
 	const char *retrkey;	
 	int isStatic;
 } Filter;
@@ -482,6 +482,9 @@ const Filter filterSet[] = {
 , { "download",   download_filter, "source_url" /*","*/ }
 , { "follow",     follow_filter, "source_url" }
 , { "checksum",   checksum_filter }
+, { "lstr" ,      lstr_filter }
+, { "rstr" ,      rstr_filter }
+, { "mstr" ,      mstr_filter }
 , { NULL }
 };
 
@@ -1069,16 +1072,20 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 					//If a filter does not exist, no real reason to quit, but you can
 					while ( *filters ) {
 						Filter *fltrs = (Filter *)filterSet;
+						char *aFilter = *filters;
+						char **args = NULL;
+						char fbuf[ 64 ];
+						memset( &fbuf, 0, sizeof(fbuf) );
 
 						//parse the args here
 						int co = memchrocc( *filters, '"', strlen( *filters ) );
-						char **args = NULL;
 						if ( co && (co % 2) == 0 ) {
 							//whew...
 							char *m = *filters;
-							int g, f = 0, argslen = 0;
-							m += g = memchrat( *filters, '"', strlen( *filters ) );
-							//*filters[ g ] = '\0'; //this assumes that there is a space, but...
+							int f = 0, argslen = 0;
+							m += memchrat( *filters, '"', strlen( *filters ) );
+							memcpy( fbuf, *filters, memchrat( *filters, ' ', strlen(*filters)) ); 
+							aFilter = fbuf;
 							args = malloc( 1 );
 
 							Mem super;
@@ -1093,15 +1100,15 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 								}
 							}
 							ADD_ELEMENT( args, argslen, char *, NULL );
-							//char **sa = args;while ( *sa ) { fprintf( stderr, "arg%d: %s\n", f++, *sa ); sa++; }
+							//char **sa = args;while( *sa ){fprintf(stderr,"arg%d: %s\n",f++,*sa);sa++;}
 						}
 
 						//find the filter and run it
 						while ( fltrs->name ) {
-							if ( strcmp( *filters, fltrs->name ) == 0 && fltrs->exec ) {
+							if ( strcmp( aFilter, fltrs->name ) == 0 && fltrs->exec ) {
 								char *block = NULL;
 								int len = 0;
-								int status = fltrs->exec( src, &block, &len, NULL, args );
+								int status = fltrs->exec( src, &block, &len, NULL, (const char **)args );
 								free( src );
 								src = malloc( len );	
 								memset( src, 0, len );
