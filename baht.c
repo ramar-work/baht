@@ -485,6 +485,8 @@ const Filter filterSet[] = {
 , { "lstr" ,      lstr_filter }
 , { "rstr" ,      rstr_filter }
 , { "mstr" ,      mstr_filter }
+, { "replace" ,   replace_filter }
+, { "trim" ,      trim_filter }
 , { NULL }
 };
 

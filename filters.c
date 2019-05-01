@@ -1,6 +1,9 @@
 //filters.c
+#define FILTER(name) \
+	name##_filter (char *block, char **dest, int *destlen, void *p, const char **y)
+
 //Just return the letters 'asdf'
-int asdf_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(asdf) {
 	const int len = 5;
 	*dest = malloc( len );
 	memset( *dest, 0, len );
@@ -8,10 +11,12 @@ int asdf_filter ( char *block, char **dest, int *destlen, void *p, const char **
 	*destlen = len - 1;
 	return 1;	
 }
+#if 0
+#endif
 
 
 //Return the block in reverse 
-int rev_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(rev) {
 	int i = 0;
 	int len = strlen( block );
 	char *b = &block[ len - 1 ];
@@ -23,10 +28,12 @@ int rev_filter ( char *block, char **dest, int *destlen, void *p, const char **y
 	*destlen = i;
 	return 1;	
 }
+#if 0
+#endif
 
 
 //download (download assets)
-int download_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(download) {
 	wwwResponse http;
 	wwwType t;
 	char *dir = filter_ref( "download_dir", NULL )->value;
@@ -38,17 +45,6 @@ int download_filter ( char *block, char **dest, int *destlen, void *p, const cha
 	select_www( block, &t );
 	char *protocol = ( t.secure ) ? "https://" : "http://";
 	fb = ( !t.fragment ) ? block : strcmbd( "", protocol, root, block );
-
-	//...
-#if 0
-	fprintf( stderr, "sec:  %d\n", t.secure );
-	fprintf( stderr, "port: %d\n", t.port );
-	fprintf( stderr, "frag: %d\n", t.fragment );
-	//memcpy( &fb[ strlen(dir) + 1 ], block, strlen(block) ); //hmm, this is a little unsafe...
-	fprintf(stderr,"Running %s, %s: %d with string '%s'\n", __func__,__FILE__,__LINE__,fb);
-	fprintf(stderr,"press enter to continue...\n" );
-	getchar();
-#endif
 
 	//free the things in http that the things do the things... yep
 	if ( !load_www( fb, &http ) ) {
@@ -84,10 +80,12 @@ int download_filter ( char *block, char **dest, int *destlen, void *p, const cha
 #endif
 	return 1;
 }
+#if 0
+#endif
 
 
 //follow (this should attempt to follow redirects)
-int follow_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(follow) {
 	//this needs another run of baht, and then still needs to do things
 	wwwResponse http;
 	wwwType t;
@@ -135,22 +133,45 @@ int follow_filter ( char *block, char **dest, int *destlen, void *p, const char 
 	( t.fragment ) ? free( fb ) : 0;
 	return 1;
 }
+#if 0
+#endif
 
 
 //checksum (generate a checksum from either an image or binary)
-int checksum_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+//int checksum_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(checksum) {
 	*dest = block;
 	*destlen = strlen(block);
+	return 1;
+}
+#if 0
+#endif
+
+
+//trim the strings
+int FILTER(trim) {
+	int nlen= 0;
+	int len = strlen( block );
+	uint8_t *tr;
+
+	if ( !*y || **y == '\0' ) { 
+		*dest = block, *destlen = strlen(block);
+		fprintf( stderr, "'trim' got no arguments.\n" );
+		return 1;
+	}
+
+	tr = lt_trim( (uint8_t *)block, (char *)*y, len, &nlen );
+	//lt_trim does not add a terminating zero, so we do it
+	*dest = malloc( ++nlen  );
+	memset( *dest, 0, nlen );
+	memcpy( *dest, tr, nlen - 1 );
+	*destlen = nlen;
 	return 1;
 }
 
 
 //return the right of a string with some characters
-int rstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
-	//this function should only have one argument,
-	//even better yet if it's a macro, but I'm not sure that can happen the way I'm doing it
-	//fprintf( stderr, "\narg @rstr: %c\n", **y );
-
+int FILTER(rstr) {
 	//increment, and find the character
 	//while ( *block && *(block++) != **y ) nt--;
 	//*dest = (!nt) ? &block[0] : block;
@@ -178,10 +199,13 @@ int rstr_filter ( char *block, char **dest, int *destlen, void *p, const char **
 	memset( block, 0, len + mlen );	
 	return 1;
 }
+#if 0
+#endif
 
 
 //return the left of a string with some characters
-int lstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+//int lstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(lstr) {
 	//fprintf( stderr, "\narg @lstr: %c\n", **y );
 	int mlen=0, len = strlen(block);
 
@@ -205,18 +229,83 @@ int lstr_filter ( char *block, char **dest, int *destlen, void *p, const char **
 	//write(2,*dest,*destlen);
 	return 1;
 }
+#if 0
+#endif
 
 
 //return the middle of a string with some characters
-int mstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+//int mstr_filter ( char *block, char **dest, int *destlen, void *p, const char **y ) {
+int FILTER(mstr) {
 	*dest = block;
 	*destlen = strlen(block);
 	return 1;
 }
+#if 0
+#endif
 
 
+//replace
+int FILTER(replace) {
+	//run memstrat, look for the first occurrence unless given a 'global' argument
+	int len, ct = 0, pos = 0;
+	char *newbuf = NULL;
+	const char **countMe = y;
+	const char *find, *replace;
+	while ( *countMe ) ct++, countMe++;
 
+	//if no arg or incorrect arg count, stop
+	if ( !*y || ct < 2 ) {
+		*dest = block, *destlen = strlen(block);
+		fprintf( stderr, "'replace' got incorrect argument count.\n" );
+		return 1;
+	}
 
+	//set things
+	find = y[0];
+	replace = y[1];
 
+	//if you can't find it, stop
+	if (( pos = memstrat( block, find, strlen(block) )) == -1 ) {
+		*dest = block, *destlen = strlen(block);
+		return 1;
+	} 
+
+	//if malloc fails, stop
+	len = (strlen(block) - strlen(find)) + strlen(replace);
+	if (( newbuf = malloc( len ) ) == NULL) {
+		*dest = block, *destlen = strlen(block);
+		return 1;
+	}
+
+	//copy and be happy
+	int sp = 0;
+	int op = 0;
+	memset( newbuf, 0, len );	
+	if ( pos ) {
+		memcpy( &newbuf[ sp ], &block[ op ], pos );
+		sp += pos, op += pos;
+	}	
+
+	if ( !strlen(replace) ) 
+		op += strlen(find);
+	else {
+		memcpy( &newbuf[ sp ], replace, strlen( replace ) ); 
+		sp += strlen( replace ), op += strlen(find);
+	}
+
+	if ( sp < len ) {
+		//fprintf(stderr,"last byte size: %ld\n", strlen(block)-op);
+		memcpy( &newbuf[ sp ], &block[ op ], strlen(block) - op ); 	
+		sp += strlen(block) - op; 	
+	}
+
+	//TODO: I feel like I shouldn't have to do this...
+	memset( block, 0, strlen(block) );
+	*dest = newbuf;
+	*destlen = len;
+	return 1;
+}
+#if 0
+#endif
 
 
