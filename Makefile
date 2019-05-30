@@ -1,6 +1,6 @@
 # Makefile for this stupid script
 CC=gcc
-VERSION=0.01
+VERSION=0.02
 CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" #-DERRV_H
 CC=clang
 CFLAGS=-Wall -Werror -Wno-unused -DSQROOGE_H -DLT_DEVICE=1 -DVERSION="\"$(VERSION)\"" -DSEE_FRAMING #-DERRV_H
@@ -12,6 +12,10 @@ DBPASSWORD=
 SQLBIN=sqlcmd
 LDFLAGS=-lgumbo -llua -lgnutls -lcurl
 PREFIX=/usr/local
+
+# top - Build the 'baht' scraper tool
+top: vendor/single.o
+	$(CC) $(CFLAGS) -DDEBUG vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME)
 
 # insecure test
 hr:
@@ -30,10 +34,6 @@ ff:
 		--rootstart "div^devil serial-mastermind xxx-uu col-md7" \
 		--jumpstart "div^shaker tostada" \
 		--nodefile tests/unique.keys
-
-# top - Build the 'baht' scraper tool
-top: vendor/single.o
-	$(CC) $(CFLAGS) -DDEBUG vendor/single.o baht.c -L. $(LDFLAGS) -o $(NAME)
 
 # href - Build baht's http handling code 
 href: vendor/single.o

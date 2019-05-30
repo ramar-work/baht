@@ -2,6 +2,11 @@
 #define FILTER(name) \
 	name##_filter (char *block, char **dest, int *destlen, void *p, const char **y)
 
+const char ucases[] = { 
+	['A']='a',['B']='b',['C']='c',['D']='d',['E']='e',['F']='f',['G']='g',['H']='h',['I']='i',['J']='j',['K']='k',['L']='l',['M']='m',['N']='n',['O']='o',['P']='p',['Q']='q',['R']='r',['S']='s',['T']='t',['U']='u',['V']='v',['W']='w',['X']='x',['Y']='y',['Z']='z'
+};
+
+
 //Just return the letters 'asdf'
 int FILTER(asdf) {
 	const int len = 5;
@@ -242,6 +247,36 @@ int FILTER(mstr) {
 }
 #if 0
 #endif
+
+
+
+//return a lowercase string
+int FILTER(lcase) {
+	//Prepare some temporary array with characters that need replacing
+	uint8_t t[256];
+	memset(t, 0, sizeof(t));
+	for ( int inc=(int)'A'; inc <= (int)'Z'; inc++ ) {
+		t[inc] = ucases[inc];
+	}
+
+	//Allocate a new buffer
+	int len = strlen(block);
+	char *nb = malloc( len + 1 );
+	memset( nb, 0, len + 1 );
+
+	//Copy old to new
+	while ( *block ) {
+		*nb = ( t[(int)*block] ) ? t[(int)*block] : *block; 
+		block++, nb++;
+	}
+
+	//Reset any pointers and return things
+	block -= len;
+	nb -= len;
+	*dest = nb;
+	*destlen = len;
+	return 1;
+}
 
 
 //replace
