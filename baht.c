@@ -85,11 +85,7 @@ elements = {
 #include <gnutls/gnutls.h>
 #include <gumbo.h>
 //TODO: These headers should no longer exist in a future version
-#include <curl/curl.h>
-#include <lua.h>
-#include <lualib.h>
-#include <lauxlib.h>
-#include <luaconf.h>
+//#include <curl/curl.h>
 
 #ifndef DEBUG
  #define RUN(c) (c)
@@ -243,9 +239,6 @@ char *global_html_dump_file = NULL;
 //User-Agent
 const char ua[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
 
-//SQL string
-const char fmt[] = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-
 //Things we'll use
 const char *gumbo_types[] = {
 	"document"
@@ -256,14 +249,6 @@ const char *gumbo_types[] = {
 , "whitespace"
 , "template"
 };
-
-const char sqlfmt[] = 
-	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );"
-#if 0
-	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-	"INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );";
-#endif
-;
 
 const char *errMessages[] = {
 	NULL
@@ -299,9 +284,106 @@ int err_print ( int status, char *fmt, ... ) {
 }
 
 
+void print_innerproc( InnerProc *pi ) {
+#ifndef DEBUG
+	0;
+#else
+	fprintf( stderr, "\n\n===========\n" );
+	fprintf( stderr, "parent:   %p\n", pi->parent );
+	fprintf( stderr, "root fragment: %s\n", pi->root.fragment ); 
+	fprintf( stderr, "root complete: %s\n", pi->root.complete ); 
+	fprintf( stderr, "root node: %d\n", pi->root.node ); 
+	fprintf( stderr, "root len: %d\n", pi->root.len ); 
+	fprintf( stderr, "jump fragment: %s\n", pi->jump.fragment ); 
+	fprintf( stderr, "jump complete: %s\n", pi->jump.complete ); 
+	fprintf( stderr, "jump node: %d\n", pi->jump.node ); 
+	fprintf( stderr, "jump len: %d\n", pi->jump.len ); 
+	fprintf( stderr, "\n" );
+
+	fprintf( stderr, "hlistLen: %d\n", pi->hlistLen );
+	fprintf( stderr, "tlistLen: %d\n", pi->tlistLen );
+	fprintf( stderr, "hlist:    %p\n", pi->hlist );
+	fprintf( stderr, "srctable:   %p\n", pi->srctable );
+	fprintf( stderr, "ctable:     %p\n", pi->ctable );
+	fprintf( stderr, "checktable: %p\n", pi->checktable );
+	fprintf( stderr, "tlist:      %p\n", pi->tlist );
+#endif
+}
+
+
+void print_tlist ( Table **tlist, int len, Table *ptr ) {
+	//Print
+	for ( int i=0; i < len; i++ ) {
+		Table *t = tlist[i];
+		//fprintf( stderr, "%p%s, ", t, sk->top == t ? "(*)" : "" );
+		fprintf( stderr, "%p%s, ", t, (ptr == t) ? "(*)" : "" );
+	}
+	fprintf( stderr, "\n" );
+}
+
+
+void print_yamlList ( yamlList **yy ) {
+	while ( *yy && (*yy)->k ) {
+		fprintf( stderr, "%s - %s\n", (*yy)->k, (*yy)->v );
+		yy++;
+	}
+}
+
+
+void print_quad ( Quad *d ) {
+	fprintf( stderr, "fragment: %s\n", d->fragment ); 
+	fprintf( stderr, "complete: %s\n", d->complete ); 
+	fprintf( stderr, "node:     %d\n", d->node ); 
+	fprintf( stderr, "len:      %d\n", d->len ); 
+}
+
+
+void print_ref ( void ) {
+	Ref **r = refs;
+	for ( int i=0; i<reflen; i++  ) {
+		fprintf( stderr, "key: %s, ", r[i]->key );
+		fprintf( stderr, "value: %s\n", r[i]->value );
+	}
+}
+
+
+//Get/set void pointers for the purpose of these filters
+Ref *filter_ref ( const char *udName, void *p ) {
+	if ( p ) { 	
+		Ref *a = malloc(sizeof(Ref));
+		a->key = udName;
+		a->value = p;
+		ADD_ELEMENT( refs, reflen, Ref *, a );
+		return a;
+	}
+	else {
+		Ref **r = refs;
+		for ( int i=0; i<reflen; i++  ) {
+			if ( strcmp( r[i]->key, udName ) == 0 ) {
+				return r[i];
+			}
+		}
+	}
+	return &nullref;
+}
+
+
+//this will crash if you don't use malloc'd strings (I wonder if [] would work)
+char *strreplace( char **affect, char *find, char *rep ) {
+	char *ff = *affect;
+	while ( *ff ) { 	
+		//TODO: Support multiple characters.  
+		//TODO: Supporting removal is also good, but might need to 
+		//happen elsewhere... especially since I don't plan on using a copy.
+		*ff = ( *ff == *find ) ? *rep : *ff;
+		ff++; 
+	}
+	return *affect;
+}
+
+
 //read files with this
 int readFd (const char *filename, uint8_t **b, int *blen) {
-
 	int fd, len;
 	struct stat sb;
 	memset( &sb, 0, sizeof( struct stat ) );
@@ -365,118 +447,8 @@ int writeFd (const char *filename, uint8_t *b, int blen) {
 }
 
 
-
-//Debugging stuff.
-void print_innerproc( InnerProc *pi ) {
-#ifndef DEBUG
-	0;
-#else
-	fprintf( stderr, "\n\n===========\n" );
-	fprintf( stderr, "parent:   %p\n", pi->parent );
-	fprintf( stderr, "root fragment: %s\n", pi->root.fragment ); 
-	fprintf( stderr, "root complete: %s\n", pi->root.complete ); 
-	fprintf( stderr, "root node: %d\n", pi->root.node ); 
-	fprintf( stderr, "root len: %d\n", pi->root.len ); 
-	fprintf( stderr, "jump fragment: %s\n", pi->jump.fragment ); 
-	fprintf( stderr, "jump complete: %s\n", pi->jump.complete ); 
-	fprintf( stderr, "jump node: %d\n", pi->jump.node ); 
-	fprintf( stderr, "jump len: %d\n", pi->jump.len ); 
-	fprintf( stderr, "\n" );
-
-	fprintf( stderr, "hlistLen: %d\n", pi->hlistLen );
-	fprintf( stderr, "tlistLen: %d\n", pi->tlistLen );
-	fprintf( stderr, "hlist:    %p\n", pi->hlist );
-	fprintf( stderr, "srctable:   %p\n", pi->srctable );
-	fprintf( stderr, "ctable:     %p\n", pi->ctable );
-	fprintf( stderr, "checktable: %p\n", pi->checktable );
-	fprintf( stderr, "tlist:      %p\n", pi->tlist );
-#endif
-}
-
-
-//
-void print_tlist ( Table **tlist, int len, Table *ptr ) {
-	//Print
-	for ( int i=0; i < len; i++ ) {
-		Table *t = tlist[i];
-		//fprintf( stderr, "%p%s, ", t, sk->top == t ? "(*)" : "" );
-		fprintf( stderr, "%p%s, ", t, (ptr == t) ? "(*)" : "" );
-	}
-	fprintf( stderr, "\n" );
-}
-
-
-void print_yamlList ( yamlList **yy ) {
-	while ( *yy && (*yy)->k ) {
-		fprintf( stderr, "%s - %s\n", (*yy)->k, (*yy)->v );
-		yy++;
-	}
-}
-
-
-void print_quad ( Quad *d ) {
-	fprintf( stderr, "fragment: %s\n", d->fragment ); 
-	fprintf( stderr, "complete: %s\n", d->complete ); 
-	fprintf( stderr, "node:     %d\n", d->node ); 
-	fprintf( stderr, "len:      %d\n", d->len ); 
-}
-
-
-//Get/set void pointers for the purpose of these filters
-Ref *filter_ref ( const char *udName, void *p ) {
-	if ( p ) { 	
-		Ref *a = malloc(sizeof(Ref));
-		a->key = udName;
-		a->value = p;
-		ADD_ELEMENT( refs, reflen, Ref *, a );
-		return a;
-	}
-	else {
-		Ref **r = refs;
-		for ( int i=0; i<reflen; i++  ) {
-			if ( strcmp( r[i]->key, udName ) == 0 ) {
-				return r[i];
-			}
-		}
-	}
-	return &nullref;
-}
-
-
-void print_ref ( void ) {
-	Ref **r = refs;
-	for ( int i=0; i<reflen; i++  ) {
-		fprintf( stderr, "key: %s, ", r[i]->key );
-		fprintf( stderr, "value: %s\n", r[i]->value );
-	}
-}
-
-
-
-//this will crash if you don't use malloc'd strings (I wonder if [] would work)
-char *strreplace( char **affect, char *find, char *rep ) {
-	char *ff = *affect;
-	while ( *ff ) { 	
-		//TODO: Support multiple characters.  
-		//TODO: Supporting removal is also good, but might need to happen elsewhere... especially since I don't plan on using a copy.
-		*ff = ( *ff == *find ) ? *rep : *ff;
-		ff++; 
-	}
-	return *affect;
-}
-#if 0
-char *bacon = "asdfg\none, two, three\nyes";
-char *ib = strdup( bacon );
-strreplace( &ib, "\n", "," );
-fprintf(stderr,"tmp: %s\n", ib );
-exit(0);
-#endif
-
-
 //Include the web handling logic
-#define _BAHTWEB
 #include "web.c"
-
 
 //Filters
 #include "filters.c"
@@ -496,11 +468,9 @@ const Filter filterSet[] = {
 };
 
 
-
 //Find a specific tag within a nodeset 
 GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 	GumboVector *children = &node->v.element.children;
-
 	for ( int i=0; i<children->length; i++ ) {
 		//Get data "endpoints"
 		GumboNode *gn = children->data[ i ] ;
@@ -517,9 +487,7 @@ GumboNode* find_tag ( GumboNode *node, GumboTag t ) {
 
 
 //Load a page and write to buffer
-//int load_page ( const char *file, char **dest, int *destlen, wwwResponse *w ) {
 int load_page ( const char *file, wwwResponse *w ) {
-
 	int fn, len=0;
 	struct stat sb;
 	char *p=NULL;
@@ -558,65 +526,30 @@ int load_page ( const char *file, wwwResponse *w ) {
 }
 
 
-//Build table from yamlList
-int yamlList_to_table ( yamlList *list, Table *t ) {
-
-	//TODO: Get a count of elements for efficient hashing
-	if ( !lt_init( t, NULL, 256 ) ) {
-		return 0;
-	}
-
-	//Loop through the list and do some work.
-	//for ( int i=0; i<sizeof(list)/sizeof(yamlList); i++ ) {
-	yamlList *x = list;
-	while ( x->k ) {
-	#if 1
-		lt_addblobkey( t, (uint8_t *)x->k, strlen( x->k ) );
-		lt_addintvalue( t, 1 );
-	#else
-		lt_addttkey( t, x->k );
-		lt_addintvalue( t, 1 );
-	#endif	
-		lt_finalize( t );
-		x++;
-	}
-	
-	//Dump the built hash.
-	//lt_dump( t );
-	return 1;
-
-}
-
-
 //Return appropriate block
 char *retblock ( GumboNode *node ) {
-
-	char *iname = NULL;
 	//Give me some food for thought on what to do
 	if ( node->type == GUMBO_NODE_DOCUMENT )
-		iname = "d";
+		return "d";
 	else if ( node->type == GUMBO_NODE_CDATA )
-		iname = "a";
+		return "a";
 	else if ( node->type == GUMBO_NODE_COMMENT )
-		iname = "c";
+		return "c";
 	else if ( node->type == GUMBO_NODE_WHITESPACE )
-		iname = "w";
+		return "w";
 	else if ( node->type == GUMBO_NODE_TEMPLATE )
-		iname = "t";
+		return "t";
 	else if ( node->type == GUMBO_NODE_TEXT )
-		iname = (char *)node->v.text.text;
+		return (char *)node->v.text.text;
 	else if ( node->type == GUMBO_NODE_ELEMENT ) {
-		iname = (char *)gumbo_normalized_tagname( node->v.element.tag );
+		return (char *)gumbo_normalized_tagname( node->v.element.tag );
 	}
-
-	return iname;
+	return NULL;
 }
 
 
-//Go through and run something on a node and ALL of its descendants
-//Returns number of elements found (that match a certain type)
-//TODO: Add element count 
-//TODO: Add filter for element count
+//Convert a Gumbo "map" to hash table.
+//TODO: Add element count and filter for element count
 int gumbo_to_table ( GumboNode *node, Table *tt ) {
 	//Loop through the body and create a "Table" 
 	GumboVector *bc = &node->v.element.children;
@@ -631,12 +564,8 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 
 		//Handle what to do with the actual node
 		//TODO: Handle GUMBO_NODE_[CDATA,COMMENT,DOCUMENT,WHITESPACE,TEMPLATE]
-		if ( n->type != GUMBO_NODE_TEXT && n->type != GUMBO_NODE_ELEMENT ) {
-			//User selected handling can take place here, usually a blank will do
-			//twoSided = 0; 
-			//lt_addnullvalue( t, itemname );
+		if ( n->type != GUMBO_NODE_TEXT && n->type != GUMBO_NODE_ELEMENT )
 			0;
-		}
 		else if ( n->type == GUMBO_NODE_TEXT ) {
 			//Clone the node text as a crude solution
 			int cl=0;
@@ -663,10 +592,6 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 			//you need to check the children and see if any are elemnts, or even better yet,
 			//if they share the same tag name (and same hash name)
 
-	#if 0
-			fprintf( stderr, "L: %d\n", gv->length );
-				getchar();
-	#else
 			//Add an id or class to a hash
 			if ( gattr->length ) {
 				if ( ( attr = gumbo_get_attribute( gattr, "id" ) ) ) {
@@ -681,7 +606,6 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 					iname = item_cname;
 				}
 			}
-	#endif
 
 			//Should always add this first
 			lt_addtextkey( tt, iname );
@@ -715,12 +639,12 @@ int gumbo_to_table ( GumboNode *node, Table *tt ) {
 
 //Put the raw HTML into a hash table 
 Table *parse_html ( char *b, int len ) {
-
 	Table *tt = NULL;
 
 	if ( global_dump_html ) {
 		write( 1, b, len );
-		exit( 0 ); //TODO: Obviously, you need to destroy things...	
+		//TODO: None of the resources are reclaimed, perhaps return and die?
+		exit( 0 ); 
 	}
 
 	//We can loop through the Gumbo data structure and create a node list that way
@@ -748,16 +672,13 @@ Table *parse_html ( char *b, int len ) {
 
 	//Parse the document into a Table
 	int elements = gumbo_to_table( body, tt );
-	#if 0
-	lt_dump( tt );
-	lt_geti( tt );
-	#endif
+	//DEBUG: What does the HTML mapped table look like?
+	//lt_dump( tt ); lt_geti( tt );
 	lt_lock( tt );
 
 	//Free the gumbo struture 
 	gumbo_destroy_output( &kGumboDefaultOptions, output );
 	return tt;
-
 }
 
 
@@ -777,12 +698,6 @@ int create_frames ( LiteKv *kv, int i, void *p ) {
 		if ( !lt_get_full_key(pi->srctable, i, (uint8_t *)fkBuf, sizeof(fkBuf)-1) ) {
 			return 1;
 		}
-	#if 0
-		//This looks like it is building something
-		DPRINTF( "fk: %s\n", 
-			(char *)lt_get_full_key( pi->srctable, i, (uint8_t *)fkBuf, sizeof(fkBuf) - 1 ) );
-		DPRINTF( "%d ? %ld\n", pi->keylen, strlen( (char *)fkBuf ) ); 
-	#endif
 		//Check strings and see if they match? (this is kind of a crude check)
 		if ( pi->jump.len == strlen(fkBuf) && memcmp(pi->jump.complete, fkBuf, pi->jump.len ) == 0 ) {
 			//save hash here and realloc a stretching int buffer...
@@ -847,8 +762,7 @@ int undupify ( LiteKv *kv, int i, void *p ) {
 }
 
 
-//a simpler way MIGHT be this
-//this should return/stop when the terminator's parent matches the checking parent 
+//TODO: Document this more fully.  I wonder if it's really needed...
 int build_ctck ( Table *tt, int start, int end ) {
 	LiteKv *kv = lt_retkv( tt, start );
 	Simp sk = { &kv->parent->value.v.vtable, 0, 0, 0, NULL };
@@ -870,8 +784,6 @@ int build_ctck ( Table *tt, int start, int end ) {
 
 //Pass through and build a smaller subset of tables
 int build_individual ( LiteKv *kv, int i, void *p ) {
-
-	//Set refs
 	InnerProc *pi = (InnerProc *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
 
@@ -883,7 +795,6 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	else if ( kt == LITE_TXT )
 		lt_addtextkey( pi->ctable, kv->key.v.vchar );	
 	else if ( kt == LITE_TRM ) {
-		//(*pi->level) --;
 		lt_ascend( pi->ctable );
 		return 1;
 	}
@@ -897,65 +808,17 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 		if ( kv->value.v.vchar )
 			lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
 		else {
-			//I wonder if this would work...
+			//TODO: Is this valid handling?
 			lt_addtextvalue( pi->ctable, "" );
 		}
 	}
 	else if ( vt == LITE_TBL ) {
-		//(*pi->level) ++;
-		//fprintf( stderr, "%p\n", &kv->value.v.vtable );
 		lt_descend( pi->ctable );
 		return 1;
 	}
 
 	lt_finalize( pi->ctable );
 	return 1;
-}
-
-
-//why would I do this?  because it works here...
-int key_from_ht_exec ( LiteKv *kv, int i, void *p ) {
-	
-	//struct why *w = (struct why *)p;
-	yamlSet *w = (yamlSet *)p;
-	LiteType kt = kv->key.type, vt = kv->value.type;
-
-	//DPRINTF( "%d %p\n", w->len, y );
-	//DPRINTF( "%s,%s\n", lt_typename( kt ), lt_typename( vt ) );
-
-	if ( kt == LITE_TXT && vt == LITE_TXT ) {
-		yamlList *tmp = malloc(sizeof(yamlList));
-		memset( tmp, 0, sizeof(yamlList));
-		tmp->k = kv->key.v.vchar; //add key
-		tmp->v = kv->value.v.vchar; //add value 
-		ADD_ELEMENT( w->list, w->len, sizeof( yamlList * ), tmp ); 
-	}
-
-	if ( kt == LITE_TRM ) {
-		return 0;
-	}
-
-	return 1;
-}
-
-
-//Assuming I use a hash table, I want to create a simple array of keys and values
-yamlList **keys_from_ht ( Table *t ) {
-	yamlSet w = { 0, NULL };
-	int h=0; 
-	//Find the elements key first
-	if (( h = lt_geti( t, "elements" )) == -1 ) {
-		VPRINTF( "Could not find 'elements' key in %s\n", "$LUA_FILE" );
-		return NULL;	
-	}
-
-	//Loop from this key if found.
-	if ( !lt_exec_complex( t, h, t->count, &w, key_from_ht_exec ) ) {
-		VPRINTF( "Something failed...\n" );
-	}
-
-	ADD_ELEMENT( w.list, w.len, sizeof( yamlList * ), NULL );
-	return w.list;
 }
 
 
@@ -994,17 +857,6 @@ yamlList ** string_to_yamlList ( const char *tmp, const char *delims, const char
 	ADD_ELEMENT( w.list, w.len, sizeof( yamlList * ), NULL );
 	return w.list;
 }
-#if 0
-const char *string="a,b|c,d|e,f";
-yamlList **y = string_to_yamlList( string, ",|", NULL );
-print_yamllist( y );
-exit( 0 );
-#endif
-
-
-void add_to_yamlList ( yamlList **y, const char *key, const char *value ) {
-	//move w.len back one
-}
 
 
 //Return the value associated with a specific key
@@ -1020,40 +872,29 @@ char *find_in_yamlList ( yamlList **y, const char *key ) {
 	return NULL;
 }
 
-void find_in_yamlset ( yamlSet *y, const char *key ) {
-	0;
-}
 
-
-void free_yamlset ( yamlSet *y ) {
-	0;
-}
-
-
-//
+//TODO: Document this fully.  It is a necessary function...
 yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 	yamlList **sql = NULL;
 	int h=0, sqlLen = 0;
+	//TODO: All I support right now are simple pipes.
+	//Booleans and lambdas may come if time avails...
 	const char *delims[] = { "|", "||", "&&", "() =>" };
 
 	while ( (*tn) ) {
 		char *k = (*tn)->k, *v = (*tn)->v;
-#if 0
-		if ( !v ) fprintf( stderr, "No target value for column %s\n", k );	
-#else
 		if ( v ) {
-#endif
-			//Use pipes for fancy things
 			char tmp[ 1024 ];
 			char *fv = NULL;
 			char **filters = NULL;
 			int flen = 0;
 
+			//Find all the filters for this particular node
 			if ( memchrat( v, '|', strlen(v) ) == -1 )
 				fv = v;
 			else {
-				//find all the filters and set fv
-				//die here if a filter does not exist...
+				//TODO: Die here if a filter does not exist... 
+				//Or at least let the user know what happened...
 				Mem set;
 				memset(&set,0,sizeof(Mem));
 				int f=0;
@@ -1062,6 +903,7 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 					//the first one SHOULD always be the hash (and the filters go from there)
 					int xlen = 0;
 					uint8_t *x = trim( (uint8_t *)&v[ set.pos ], " \t", set.size, &xlen ); 
+					//DEBUG: See filters and their arguments...
 					//write( 2, "[", 1 );write( 2, x, xlen );write( 2, "]\n", 2 );
 
 					if ( !f++ ) {
@@ -1070,26 +912,23 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 						fv = tmp;
 					}
 					else {
-						//add each to a thing
-						char buf[ 1024 ];
+						char *filter=NULL, buf[1024];
 						memset( &buf, 0, sizeof( buf ) );
 						memcpy( buf, x, xlen );
-						char *filter = strdup( buf );
-						//check the filter availability here?
+						filter = strdup( buf );
 						ADD_ELEMENT( filters, flen, char *, filter ); 
 					}
 				}
-
 				ADD_ELEMENT( filters, flen, char *, NULL );
 			}
 
-			//get the hash	
+			//Check that the node actually exists in the HTML map
 			if ( (h = lt_geti( t, fv )) > -1 ) {
 				yamlList *kv = malloc( sizeof(yamlList) );
 				memset( kv, 0, sizeof(yamlList) );
 				kv->k = k;
 
-				//Now cycle through each filter
+				//Find that node's filters
 				if ( !filters ) 
 					kv->v =	lt_text_at( t, h );  
 				else {
@@ -1129,6 +968,7 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 								}
 							}
 							ADD_ELEMENT( args, argslen, char *, NULL );
+							//DEBUG: What filters were picked up?
 							//char **sa = args;while( *sa ){fprintf(stderr,"arg%d: %s\n",f++,*sa);sa++;}
 						}
 
@@ -1157,7 +997,7 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 		tn++;
 	}
 	yamlList *term = malloc( sizeof(yamlList) );
-	term->k = NULL; //term->v = NULL;
+	term->k = NULL;
 	ADD_ELEMENT( sql, sqlLen, yamlList *, term );
 	*len = sqlLen;
 	return sql;
@@ -1165,175 +1005,26 @@ yamlList ** find_keys_in_mt ( Table *t, yamlList **tn, int *len ) {
 
 
 //
-int expandbuf ( char **buf, char *src, int *pos ) {
-	//allocate additional space
-	realloc( *buf, strlen( src ) );
-	memset( &buf[ *pos ], 0, strlen( src ) );
-	memcpy( &buf[ *pos ], src, strlen( src ) );
-	*pos += strlen( src );	
+int str_addformatted ( char **buf, int *pos, const char *fmt, char *src ) {
+	//allocate and copy
+	char *a = malloc( strlen(fmt) + strlen(src) );
+	memset( a, 0, strlen(fmt) + strlen(src) );
+	snprintf( a, strlen(fmt) + strlen(src), fmt, src );
+
+	//allocate additional space in the persistent buffer
+	*buf = realloc( *buf, *pos + strlen( a ) );
+	memset( &(*buf)[ *pos ], 0, strlen( a ) );
+	memcpy( &(*buf)[ *pos ], a, strlen( a ) );
+	*pos += strlen( a );	
+	free( a );
 	return 1;
-}
-
-
-//Gumbo to Table 
-int lua_to_table (lua_State *L, int index, Table *t ) {
-	static int sd;
-	lua_pushnil( L );
-
-	while ( lua_next( L, index ) != 0 ) {
-		int kt, vt;
-#if 0
-		//This should pop both keys...
-		obprintf( stderr, "%s, %s\n", lua_typename( L, lua_type(L, -2 )), lua_typename( L, lua_type(L, -1 )));
-
-		//Keys
-		if (( kt = lua_type( L, -2 )) == LUA_TNUMBER )
-			obprintf( stderr, "key: %lld\n", (long long)lua_tointeger( L, -2 ));
-		else if ( kt  == LUA_TSTRING )
-			obprintf( stderr, "key: %s\n", lua_tostring( L, -2 ));
-
-		//Values
-		if (( vt = lua_type( L, -1 )) == LUA_TNUMBER )
-			obprintf( stderr, "val: %lld\n", (long long)lua_tointeger( L, -1 ));
-		else if ( vt  == LUA_TSTRING )
-			obprintf( stderr, "val: %s\n", lua_tostring( L, -1 ));
-#endif
-
-		//Get key (remember Lua indices always start at 1.  Hence the minus.
-		if (( kt = lua_type( L, -2 )) == LUA_TNUMBER )
-			lt_addintkey( t, lua_tointeger( L, -2 ) - 1);
-		else if ( kt  == LUA_TSTRING )
-			lt_addtextkey( t, (char *)lua_tostring( L, -2 ));
-
-		//Get value
-		if (( vt = lua_type( L, -1 )) == LUA_TNUMBER )
-			lt_addintvalue( t, lua_tointeger( L, -1 ));
-		else if ( vt  == LUA_TSTRING )
-			lt_addtextvalue( t, (char *)lua_tostring( L, -1 ));
-		else if ( vt == LUA_TTABLE ) {
-			lt_descend( t );
-			//obprintf( stderr, "Descending because value at %d is table...\n", -1 );
-			//lua_loop( L );
-			lua_to_table( L, index + 2, t ); 
-			lt_ascend( t );
-			sd--;
-		}
-
-		//obprintf( stderr, "popping last two values...\n" );
-		if ( vt == LUA_TNUMBER || vt == LUA_TSTRING ) {
-			lt_finalize( t );
-		}
-		lua_pop(L, 1);
-	}
-
-	lt_lock( t );
-	return 1;
-}
-
-
-//
-int lua_load_file( lua_State *L, const char *file, char **err ) {
-	if ( luaL_dofile( L, file ) != 0 ) {
-		fprintf( stderr, "Error occurred!\n" );
-		//The entire stack needs to be cleared...
-		if ( lua_gettop( L ) > 0 ) {
-			fprintf( stderr, "%s\n", lua_tostring(L, 1) );
-			return ( snprintf( *err, 1023, "%s\n", lua_tostring( L, 1 ) ) ? 0 : 0 );
-		}
-	}
-	return 1;	
-}
-
-
-//
-void lua_dumptable ( lua_State *L, int *pos, int *sd ) {
-	lua_pushnil( L );
-	//fprintf( stderr, "*pos = %d\n", *pos );
-
-	while ( lua_next( L, *pos ) != 0 ) {
-		//Fancy printing
-		//fprintf( stderr, "%s", &"\t\t\t\t\t\t\t\t\t\t"[ 10 - *sd ] );
-		//PRETTY_TABS( *sd );
-		fprintf( stderr, "[%3d:%2d] => ", *pos, *sd );
-
-		//Print both left and right side
-		for ( int i = -2; i < 0; i++ ) {
-			int t = lua_type( L, i );
-			const char *type = lua_typename( L, t );
-			if ( t == LUA_TSTRING )
-				fprintf( stderr, "(%8s) %s", type, lua_tostring( L, i ));
-			else if ( t == LUA_TFUNCTION )
-				fprintf( stderr, "(%8s) %p", type, (void *)lua_tocfunction( L, i ) );
-			else if ( t == LUA_TNUMBER )
-				fprintf( stderr, "(%8s) %lld", type, (long long)lua_tointeger( L, i ));
-			else if ( t == LUA_TBOOLEAN)
-				fprintf( stderr, "(%8s) %s", type, lua_toboolean( L, i ) ? "true" : "false" );
-			else if ( t == LUA_TTHREAD )
-				fprintf( stderr, "(%8s) %p", type, lua_tothread( L, i ) );
-			else if ( t == LUA_TLIGHTUSERDATA || t == LUA_TUSERDATA )
-				fprintf( stderr, "(%8s) %p", type, lua_touserdata( L, i ) );
-			else if ( t == LUA_TNIL ||  t == LUA_TNONE )
-				fprintf( stderr, "(%8s) %p", type, lua_topointer( L, i ) );
-			else if ( t == LUA_TTABLE ) {
-				fprintf( stderr, "(%8s) %p\n", type, lua_topointer( L, i ) );
-				(*sd) ++, (*pos) += 2;
-				lua_dumptable( L, pos, sd );
-				(*sd) --, (*pos) -= 2;
-				//PRETTY_TABS( *sd );
-				fprintf( stderr, "}" );
-			}
-			fprintf( stderr, "%s", ( i == -2 ) ? " -> " : "\n" );
-		}
-
-		lua_pop( L, 1 );
-	}
-	return;
-}
-
-
-//parse_lua
-Table *parse_lua ( const char *file ) {
-	Table *tt = NULL;
-	lua_State *L = NULL;
-
-	//Initialize something for Lua
-	if ( !( tt = malloc(sizeof(Table))) ) {
-		return NULL;
-	}
-
-	//This can fail too
-	if ( !lt_init( tt, NULL, 127 ) ) {
-		return NULL;
-	}
-
-	//Catch Lua environment allocation failures.
-	if ( !(L = luaL_newstate()) ) {
-		err_set( 0, "%s\n", "Lua failed to initialize." );
-		return NULL;
-	}
-
-	//And check for load errors.
-	luaL_openlibs( L );
-	if ( luaL_dofile( L, file ) != 0 ) {
-		if ( lua_gettop( L ) > 0 ) {
-			err_set( 0, "error happened with Lua: %s\n", lua_tostring( L, 1 ) );
-			return NULL;
-		}
-	}
-
-	//Convert to Table
-	lua_to_table( L, 1, tt );
-	//lt_dump( t );
-
-	return tt;
 }
 
 
 //Option
 Option opts[] = {
 	//These ought to always be around
-  { "-l", "--load",       "Load a file on the command line.", 's' }
- ,{ "-f", "--file",       "Get a file on the command line.", 's' }
+  { "-f", "--file",       "Get a file on the command line.", 's' }
  ,{ "-u", "--url",        "Check a URL from the WWW", 's' }
  ,{ "-o", "--output",     "Send output to this file", 's' }
  ,{ "-t", "--tmp",        "Use this as a source folder for any downloads.", 's' }
@@ -1351,7 +1042,6 @@ Option opts[] = {
  ,{ "-k", "--show-full-key",    "Show a full key"  }
  ,{ NULL, "--see-raw-html",     "Dump received HTML to file.", 's' }
  ,{ NULL, "--see-parsed-html",  "Dump the parsed HTML and stop." }
- ,{ NULL, "--see-parsed-lua",   "Dump the parsed Lua file and stop." }
  ,{ NULL, "--see-crude-frames", "Show the frames at first pass" }
  ,{ NULL, "--see-nice-frames",  "Show the frames at second pass" }
  ,{ NULL, "--step",             "Step through frames" }
@@ -1369,74 +1059,39 @@ Option opts[] = {
  ,{ .sentinel = 1 }
 };
 
-#if 0
-//Command loop
-struct Cmd {
-	const char *cmd;
-	int (*exec)( Option *, char *, Passthru *pt );
-} Cmds[] = {
-	{ "--kill"     , kill_cmd  }
- ,{ "--file"     , file_cmd  }
- ,{ "--start"    , start_cmd }
- ,{ NULL         , NULL      }
-};
-#endif
-
-
-
 
 //Much like moving through any other parser...
-int main( int argc, char *argv[] ) {
+int main ( int argc, char *argv[] ) {
 	//Show the version and compilation date
 	SHOW_COMPILE_DATE();
 
 	//Process some options
 	(argc < 2) ? opt_usage(opts, argv[0], "nothing to do.", 0) : opt_eval(opts, argc, argv);
 
-	//Define references
-	char *b=NULL, *sc=NULL, *yamlFile=NULL; 
-	char *ps[] = { NULL, NULL };
-	char **p = ps;
-	int len=0;
-	int blen=0;
-	char *luaFile = NULL;
+	//Define all of that mess up here
+	char *pagePtr = NULL;
+	Table *tHtml=NULL; 
+	int pageType=0;
+	yamlList **ky = NULL;
+
+	//TODO: Use dynamic buffers instead... code ought to be cleaner.
+	uint8_t fkbuf[KEYBUFLEN] = { 0 }; 
+	uint8_t rkbuf[KEYBUFLEN] = { 0 };
 
 	//Define and initailize these large structures.
 	wwwResponse www;
 	InnerProc pp;
-	refs = malloc( 1 );
 	memset( &www, 0, sizeof(wwwResponse) ); 
 	memset( &pp, 0, sizeof(InnerProc) ); 
 
-#if 0
-	int ph=300;
-	wwwResponse h;
-	h.status = 150;
-	filter_ref( "we_good", "hi" );
-	filter_ref( "there", &ph );
-	filter_ref( "here", &h );
-	print_ref ( );
-	exit( 0 );
-#endif
-
-	//Define all of that mess up here
-	uint8_t fkbuf[KEYBUFLEN] = { 0 }, rkbuf[KEYBUFLEN]={0};
-	char *pageUrl = NULL;
-	Table *tHtml=NULL, *tYaml=NULL;
-	yamlList **ky = NULL;
-	int kylen=0; 
-	int pageType=0;
-
-	yamlList **fy = NULL;
-
-
-	//Set verbosity
+	//Set your globals here (yes, I said globals...)	
+	//TODO: There must be a better way to handle this.
+	refs = malloc( 1 );
 	verbose = opt_set( opts, "--verbose" ); 
 
 	//Set any filter options here
 	if ( opt_set( opts, "--filter-opts" ) ) {
-		//chop the list and start adding things
-		//prefix, suffix, transform, etc can all be thrown in here
+		//Chops a comma-seperated list of filters...
 		char *filteropts = opt_get( opts, "--filter-opts" ).s;
 		yamlList **xy = string_to_yamlList( filteropts, "=,", NULL );
 		print_yamlList( xy ); 
@@ -1452,102 +1107,58 @@ int main( int argc, char *argv[] ) {
 		filter_ref( "download_dir", (char *)download_dir );
 	}
 
-	//Load a Lua file
-	if ( opt_set( opts, "--load" ) ) {
-		luaFile = opt_get( opts, "--load" ).s;
-		if ( !luaFile ) {
-			return err_print( 0, "%s", "No file specified." );	
-		}
-		
-		VPRINTF( "Loading and parsing Lua document at %s\n", luaFile );
-		//
-		if ( !(tYaml = parse_lua( luaFile )) ) {
-			return err_print( 0, "%s", _errbuf  );
-		}
-
-	#ifdef SEE_FRAMING
-		if ( opt_set( opts, "--see-parsed-lua" ) ) {
-			lt_kdump( tYaml );
-			died = 0;
-			goto destroy;
-		}
-	#endif
-	}
-	
 	//Load a webpage
 	if ( opt_set( opts, "--url" ) ) {
 		pageType = PAGE_URL;
-		if ( !(pageUrl = opt_get( opts, "--url" ).s) ) {
+		if ( !(pagePtr = opt_get( opts, "--url" ).s) ) {
 			return err_print( 0, "No URL specified for dump." ); 
 		}
-		VPRINTF( "Loading and parsing URL: '%s'\n", pageUrl );
+		VPRINTF( "Loading and parsing URL: '%s'\n", pagePtr );
 	}
 
 	//Load an HTML file 
 	if ( opt_set( opts, "--file" ) ) {
 		pageType = PAGE_FILE;
-		if ( !(pageUrl = opt_get( opts, "--file" ).s) ) {
+		if ( !(pagePtr = opt_get( opts, "--file" ).s) ) {
 			return err_print( 0, "No file specified for dump." ); 
 		}
-		VPRINTF( "Loading and parsing HTML document at '%s'\n", pageUrl );
+		VPRINTF( "Loading and parsing HTML document at '%s'\n", pagePtr );
 	}
 
-	//Now get the hash map keys to map HTML to needed nodes
-	if ( tYaml ) {
-		//Shouldn't I catch this?
-		ky = keys_from_ht( tYaml );
-
-#if 0
-		//The hash functions bring back duplicates.
-		if ( lt_text( tYaml, "page.url" ) != NULL )
-			pageUrl = lt_text( tYaml, "page.url" ), pageType = PAGE_URL;
-		else 
-#endif
-		if ( lt_text( tYaml, "page.file" ) != NULL )
-			pageUrl = lt_text( tYaml, "page.file" ), pageType = PAGE_FILE;
-		else if ( lt_text( tYaml, "page.command" ) != NULL ) {
-			pageUrl = lt_text( tYaml, "page.command" ), pageType = PAGE_CMD;
-		}
-	}
-
-
-#if 1
 	//Also chop the nodes from here	
 	if ( opt_set(opts, "--nodes") || opt_set(opts, "--nodefile") ) { 
 		//chop command line args by a comma, or files by : and \n
 		const char types[] = { 'c', 'f' };
 		const char *args[] = { opt_get(opts,"--nodes").s,  opt_get(opts,"--nodefile").s };
 		const char *delims = "=,";// { "=,", ":\n" };
+		int kylen=0; 
 		
 		for ( int i=0; i<sizeof(args)/sizeof(char *); i++ ) {
 			if ( args[ i ] ) {
-				fprintf(stderr,"proc %s: '%s'\n", (types[i] == 'c') ? "arg" : "file", args[ i ] );	
 				char *tmp = NULL;
 				if ( types[ i ] == 'c' )
 					tmp = (char *)args[ i ];
-				//TODO: This is ridiculous...
 				else {
 					const char *file = args[ i ];
 					char *p = NULL, *q = NULL;
 					int len = 0, qlen = 0;
 					if ( !readFd( file, (uint8_t **)&p, &len ) ) {
-						//err_print( 0, "%s", "something bad happened at readFd." );
 						err_print( 0, "%s", _errbuf  );
 						goto destroy;
 					}
 
-					//TODO: Still not thread safe, fix this...
-					Mem mset;
-					memset(&mset,0,sizeof(Mem));
-				
-					//Allocate a new buffer... 
+					//Allocate a new buffer for raw, usable text
 					if ( !(q = malloc( len + 1 )) ) {
 						err_print( 0, "%s", "Malloc of new buffer failed...\n" );	
 						goto destroy;
 					}
 				
-					//...and copy only uncommented values here...
+					//TODO: This is not thread safe, fix this...
+					Mem mset;
+					memset(&mset,0,sizeof(Mem));
 					memset( q, 0, len + 1 );
+
+					//Copy only uncommented lines here...
 					while ( strwalk( &mset, p, "\n" ) ) {
 						if ( *p == '#' && mset.pos == 0 )
 							continue;
@@ -1556,34 +1167,39 @@ int main( int argc, char *argv[] ) {
 						if ( mset.chr == '\n' && p[mset.pos] == '\n' )
 							continue;
 						//write( 2, &p[mset.pos], mset.size );write( 2, "\n", 1 );
-						//TODO: this will probably cause a problem, mset.size + 1 needs a check
+						//TODO: this is unsafe, mset.size + 1 needs a check
 						memcpy( &q[ qlen ], &p[mset.pos], mset.size + 1 );
 						qlen += mset.size + 1;
 					}
-					//write(2,q,qlen); write(2,"\n",1); exit(0);
-					//tmp = p;
+		
+					//Destroy the original buffer and set ref to the new one.
+					free( p );
+					//TODO: Resize the new buffer, because it will most likely always be 
+					//smaller than the original...
+					//q = realloc( q, newSize ); 
 					tmp = q;
 				}
 
 				//Now walk through the memory.
-				//write(2,tmp,strlen(tmp)); exit(0);
 				if ( tmp ) {
+					//TODO: This needs to be implemented soon.
 				#if 0
-					strreplace( &tmp, "\n", "," );
-fprintf(stderr,"tmp: %s\n", tmp );
+					strreplace( &tmp, "\n", "," ); fprintf(stderr,"tmp: %s\n", tmp );
 					//string_to_yamlList( tmp, delims, NULL );
 				#else
 					//turn text blocks into continuous strings (get rid of \n and use ',')
 					char *ff = tmp;
 					while ( *ff ) { *ff = (*ff == '\n') ? ',' : *ff; ff++; }
-					//this could be U/B...
+					//TODO: this could be U/B... watch out
 					ff--, *ff = '\0';
+				#endif
 
-					Mem set; //TODO: This must not be / is not thread safe... fix it
 					int f=0; 
 					yamlList *tp = NULL;
+
+					//TODO: strwalk is not thread safe... fix it
+					Mem set; 
 					memset(&set,0,sizeof(Mem));
-					
 					while ( strwalk( &set, tmp, delims ) ) {
 						char buf[ 1024 ];
 						memset( &buf, 0, 1024 );
@@ -1600,44 +1216,28 @@ fprintf(stderr,"tmp: %s\n", tmp );
 							f = 0;
 						}
 					}
-				#endif
 				}
 			}
 		}
-
-#if 0
-		yamlList *tp = malloc( sizeof(yamlList) );
-		memset( tp, 0, sizeof(yamlList));
-		tp->k = NULL, tp->v = NULL;
-#endif
 		ADD_ELEMENT( ky, kylen, sizeof( yamlList * ), NULL ); 
-#if 0
-	print_yamllist( yy );
-#endif
 	}
-#endif
-
-
-	//Dump the nodelist and see if things are loading...
-	//print_yamllist( yy );
 
 	//Load the page from the web (or from file, but right now from web)
-	if ( pageType == PAGE_URL && !load_www( pageUrl, &www ) ) {
-		err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
+	if ( pageType == PAGE_URL && !load_www( pagePtr, &www ) ) {
+		err_print( 0, "Loading page at '%s' failed.\n", pagePtr );
 		goto destroy;
 	}
 
 	//Load the page from file
-	if ( pageType == PAGE_FILE && !load_page( pageUrl, &www ) ) {
-		err_print( 0, "Loading page '%s' failed.\n", pageUrl );
+	if ( pageType == PAGE_FILE && !load_page( pagePtr, &www ) ) {
+		err_print( 0, "Loading page '%s' failed.\n", pagePtr );
 		goto destroy;
 	}
 
-//print_www( &www );
 #if 0
 	//Load the page via a command 
-	if ( !load_by_exec( pageUrl, &b, &blen, &www ) ) {
-		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
+	if ( !load_by_exec( pagePtr, &www ) ) {
+		return err_print( 0, "Loading page at '%s' failed.\n", pagePtr );
 	}
 #endif
 
@@ -1653,16 +1253,16 @@ fprintf(stderr,"tmp: %s\n", tmp );
 		goto destroy;
 	}
 
-#ifdef SEE_FRAMING
+	#ifdef SEE_FRAMING
 	//If parsing only, stop here
 	if ( opt_set( opts, "--see-parsed-html" ) ) {
-		if ( !opt_set( opts, "--file" ) && !opt_set( opts, "--url" ) && !luaFile )
-			return err_print( 0, "--see-parsed-html specified but no source given (try --file, --url or --load flags).\n" );
+		if ( !opt_set( opts, "--file" ) && !opt_set( opts, "--url" ) ) 
+			return err_print( 0, "--see-parsed-html specified but no source given (try --file or --url flags).\n" );
 		lt_kdump( tHtml );
 		died = 0;
 		goto destroy;
 	}
-#endif
+	#endif
 
 	//If there are no nodes, we can't really do anything.
 	if ( !ky ) {
@@ -1670,18 +1270,12 @@ fprintf(stderr,"tmp: %s\n", tmp );
 		goto destroy;
 	}
 
-	//Load Lua hashes first, if overriding, use those options
-	if ( tYaml ) {
-		pp.root.fragment = lt_text( tYaml, "root.origin" );
-		pp.jump.fragment = lt_text( tYaml, "root.start" );
-	}
-
 	//Likewise, also try to load values from nodefiles
-	if ( ky ) { //the check is useless, but keeps the code consistent
+	if ( ky ) { //This check is useless, but keeps the code consistent
 		//print_yamlList( ky ); exit(0);
 		pp.root.fragment = find_in_yamlList( ky, "root_origin"	);
 		pp.jump.fragment = find_in_yamlList( ky, "jump_start"	);
-		//fprintf(stderr,"root: %s\njump: %s\n", pp.root.fragment, pp.jump.fragment );
+		VPRINTF( "root: %s\njump: %s\n", pp.root.fragment, pp.jump.fragment );
 	}
 
 	//Then try checking command line opts for values
@@ -1692,6 +1286,7 @@ fprintf(stderr,"tmp: %s\n", tmp );
 		pp.jump.fragment = opt_get( opts, "--jumpstart" ).s; 
 
 	#if 0
+	//TODO: Leave this alone for now, but it will be important later.
 	if ( opt_set( opts, "--framestart" ) ) {
 		pp.framestart = opt_get( opts, "--framestart" ).s; 
 	}
@@ -1701,12 +1296,13 @@ fprintf(stderr,"tmp: %s\n", tmp );
 	}
 	#endif
 
-	//Find the root node.
+	//Check for a string pointing to a root node.
 	if ( !pp.root.fragment ) {
 		err_print( 0, "no root fragment specified.\n", pp.root.fragment );
 		goto destroy;
 	}
 
+	//Find the root node.
 	if ( ( pp.root.node = lt_geti( tHtml, pp.root.fragment ) ) == -1 ) {
 		err_print( 0, "string '%s' not found.\n", pp.root.fragment );
 		goto destroy;
@@ -1742,14 +1338,14 @@ fprintf(stderr,"tmp: %s\n", tmp );
 	pp.jump.len = strlen( pp.jump.complete );
 	pp.root.len = strlen( pp.root.complete );
 
-	//Dump the processing structure ahead of processing 
-	print_innerproc( &pp );
+	//DEBUG: Dump the processing structure ahead of processing 
+	//print_innerproc( &pp );
 
 	//Start the extraction process 
 	lt_exec( tHtml, &pp, create_frames );
 
-	//Dump the processing structure after processing 
-	print_innerproc( &pp );
+	//DEBUG: Dump the processing structure after processing 
+	//print_innerproc( &pp );
 
 	//If hlistLen is zero, we didn't find the frames...
 	if ( !pp.hlistLen ) {
@@ -1760,11 +1356,15 @@ fprintf(stderr,"tmp: %s\n", tmp );
 	//Build individual tables for each.
 	for ( int i=0; i<pp.hlistLen; i++ ) {
 		int start = pp.hlist[ i ];
-		//int end = ( i+1 > pp.hlistLen ) ? tHtml->count : pp.hlist[ i+1 ]; 
 		int end = ( i+1 == pp.hlistLen ) ? -1 : pp.hlist[ i+1 ]; 
-		//int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
+
+		//TODO: This is a source of great frustration.  Without explicitly
+		//specifying where the code should stop, I am at a loss as how to
+		//limit the set of nodes... 
+		//I need something like:
+		//int end = ( i+1 > pp.hlistLen ) ? endOfFrames( ... ) : pp.hlist[ i+1 ]; 
 		if ( end == -1 ) break;
-//fprintf(stderr,"start+end: %d, %d\n", start, end );
+
 		//Create a table to track occurrences of hashes
 		build_ctck( tHtml, start, end - 1 ); 
 
@@ -1777,12 +1377,10 @@ fprintf(stderr,"tmp: %s\n", tmp );
 
 		//Create a new table
 		//TODO: Why -3?  
-//lt_dump(tHtml); exit(0);
 		lt_exec_complex( tHtml, start, end - 3, &pp, build_individual );
-		//exit(0);
 		lt_lock( pp.ctable );
 
-	#ifdef SEE_FRAMING
+		#ifdef SEE_FRAMING
 		//Dump the "crude" frames...
 		if ( opt_set( opts, "--see-crude-frames" ) ) {
 			lt_kdump( pp.ctable );
@@ -1791,81 +1389,50 @@ fprintf(stderr,"tmp: %s\n", tmp );
 				getchar();
 			}
 		}
-	#endif
+		#endif
 	}
 
-	//Dump the processing structure after processing 
-	print_innerproc( &pp );
+	//DEBUG: Dump the processing structure after processing 
+	//print_innerproc( &pp );
 
 	//Destroy the source table. 
 	lt_free( tHtml );
 
 	//This is supposed to be used to create our data string.
-	//We can stream to a number of formats, and should anticipate that.
-	//CSV, SQL, even Excel (or at least ODF) ought to be doable.
-	//That said, this looks like a job for a Function Pointer...
+	//TODO: Support more formats besides SQL, such as CSV, Excel, ODF...
 	for ( int i=0; i<pp.tlistLen; i++ ) {
 		Table *tHtmllite = pp.tlist[ i ];
-
-		//TODO: Simplify this, by a large magnitude...
 		int baLen = 0, vLen = 0, mtLen = 0;
-	#if 0
-		char *babuf=NULL, *vbuf=NULL, *fbuf=NULL;
-	#else
-		char babuf[ 20000 ] = {0};
-		char vbuf[ 100000 ] = {0};
-		char fbuf[ 120000 ] = {0};
-	#endif
+		char *babuf=malloc(1), *vbuf=malloc(1);
 
 		//I need to loop through the "block" and find each hash
 		yamlList **keys = find_keys_in_mt( tHtmllite, ky, &mtLen );
-	#if 0
-		print_yamlList( keys ); exit( 0 );
-	#endif
+		//DEBUG: See these values.
+		//print_yamlList( keys ); exit( 0 );
 
 		//Then loop through matched keys and values
 		while ( (*keys)->k ) {
 			if ( (*keys)->v ) {
-		#if 0
-			expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
-			expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
-			keys++;
-		#else
-			memcpy( &babuf[ baLen ], (*keys)->k, strlen( (*keys)->k ) ); 
-			baLen += strlen( (*keys)->k ); 
-
-			//Add actual words
-			memcpy( &vbuf[ vLen ], "\"", 1 );
-			memcpy( &vbuf[ vLen + 1 ], (*keys)->v, strlen( (*keys)->v ) ); 
-			vLen += strlen( (*keys)->v ) + 1;
-			memcpy( &vbuf[ vLen ], "\"", 1 );
-			vLen ++;
-
-			//Add a comma
-			memcpy( &babuf[ baLen ], ", ", 2 );
-			memcpy( &vbuf[ vLen ], ", ", 2 );
-			baLen+= 2, vLen+= 2;
+				str_addformatted( &babuf, &baLen, "%s, ", (*keys)->k );
+				str_addformatted( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
 			} 
-		#endif
 			keys++; 
 		}
-
-		//Create a SQL creation string, if any hashes were found.
-		if ( mtLen > 1 ) {
-		#if 0
-			babuf[ baLen-2 ]='\0', vbuf[ vLen-2 ]='\0';
-			snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
-			free( babuf );
-			free( vbuf );
-		#else
-			baLen -= 2, vLen -= 2;
-			babuf[ baLen ] = '\0';
-			vbuf[ vLen ] = '\0';
-			snprintf( fbuf, sizeof(fbuf), fmt, babuf, vbuf );
-		#endif
-			fprintf( stdout, "%s\n", fbuf );
+		
+		//Terminate and let the user know there was a problem.
+		//Create a format string, if hashes were found.  Terminate if not.
+		if ( baLen < 2 || vLen < 2 || mtLen == 1 ) {
+			err_print( 1, "No nodes found in source." );
+			goto destroy;
+		}
+		else {
+			const char fmt[] = "INSERT INTO cw_dealer_inventory ( %s ) VALUES ( %s );\n";
+			babuf[ baLen-2 ] = '\0', vbuf[ vLen-2 ] = '\0';
+			fprintf( stdout, fmt, babuf, vbuf );
 		}
 
+		free(babuf); 
+		free(vbuf);
 		lt_free( tHtmllite );
 	}
 
@@ -1885,10 +1452,6 @@ destroy:
 		free( tHtml );
 	}
 
-	if ( tYaml ) { 
-		lt_free( tYaml );
-		free( tYaml );
-	}
 	return died;
 }
 

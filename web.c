@@ -40,7 +40,7 @@
 #endif
 
 //This allows me to compile this file as an executable
-#ifndef _BAHTWEB
+#ifdef IS_TEST
 #include "vendor/single.h"
 #include <curl/curl.h>
 #include <gnutls/gnutls.h>
@@ -435,8 +435,10 @@ int load_www ( const char *p, wwwResponse *r ) {
 		root = rootBuf;
 	}
 
+	#ifndef IS_TEST
 	//Add the source URL to our mysterious chain
 	filter_ref( "source_url", (void *)strdup( root ) );
+	#endif
 
 	//HEADs and GETs
 	const char GetMsgFmt[] = 
@@ -917,7 +919,6 @@ int write_to_file ( const char *filename, uint8_t *buf, int buflen ) {
 
 
 #ifdef IS_TEST
-
 #if 0
  #include "tests/urlHttp.c"
  #include "tests/urlHttps.c"

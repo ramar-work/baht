@@ -11,7 +11,7 @@ DBUSER=
 DBPASSWORD=
 SQLBIN=sqlcmd
 LDDIRS=lib
-LDFLAGS=-lgumbo -lgnutls -llua #-lgnutls -lcurl
+LDFLAGS=-lgumbo -lgnutls #-llua #-lgnutls -lcurl
 PREFIX=/usr/local
 
 # build - Build the 'baht' scraper tool
@@ -34,7 +34,7 @@ explain:
 # clean - clean up
 clean:
 	-rm -f *.o vendor/*.o
-	-rm -f $(NAME)
+	-rm -f $(NAME) ref
 
 # install - Install the tool somewhere
 install:
