@@ -862,6 +862,20 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Set refs
 	InnerProc *pi = (InnerProc *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
+#if 0
+	if ( kt == LITE_TXT && vt == LITE_TXT ) { 
+		fprintf( stderr,"[%p] %s => %s ", kv, lt_typename( kt ), lt_typename( vt ) ); 
+		fprintf(stderr,"%ld => %ld\n", strlen( kv->key.v.vchar ), strlen( kv->value.v.vchar ) );
+		#if 0
+		fprintf(stderr,"%s => ", kv->key.v.vchar);
+		fprintf(stderr,"%s\n", kv->value.v.vchar);
+		#endif
+	}
+	//if ( kt == LITE_TXT ) fprintf(stderr,"%s\n",	
+	//if ( kt == LITE_TXT ) fprintf(stderr,"%s\n",	
+	return 1;
+	//fprintf( stderr,"%s => %s\n", kv->key.v.vchar, kv->value.v.vchar ); getchar();
+#endif
 
 	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
@@ -879,7 +893,7 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Save value 
 	if ( vt == LITE_INT || vt == LITE_FLT ) 
 		lt_addintvalue( pi->ctable, kv->value.v.vint );	
-	else if ( vt == LITE_BLB)
+	else if ( vt == LITE_BLB )
 		lt_addblobvalue( pi->ctable, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
 	else if ( vt == LITE_TXT )
 		lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
@@ -1621,6 +1635,7 @@ fprintf(stderr,"tmp: %s\n", tmp );
 		goto destroy;
 	}
 
+//print_www( &www );
 #if 0
 fprintf(stderr,"%s: %d\n", __FILE__, __LINE__ );
 print_ref( );
@@ -1760,6 +1775,7 @@ exit( 0 );
 		//Create a new table
 		//TODO: Why -3?  
 		lt_exec_complex( tHtml, start, end - 3, &pp, build_individual );
+		//exit(0);
 		lt_lock( pp.ctable );
 
 	#ifdef SEE_FRAMING
