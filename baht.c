@@ -1,91 +1,71 @@
 /* ---------------------------------------------- *
- * baht 
- * =========
- * 
- * Summary
- * -------
- * A web scraper, which assists in building databases.
- * 
- * Usage
- * -----
- * tbd
- *
- * Flags 
- * -----
- * -DDEBUG - Show debugging information 
- * -DHASHTYPE_* - Compile with different hash schemes? 
- * -DSEE_FRAMING * - Compile with the ability to see dumps of hashes
- * 
- * Author
- * ------
- * Antonio R. Collins II (ramar@tubularmodular.com, ramar.collins@gmail.com)
- * Copyright: Tubular Modular Feb 9th, 2019
- *
- * Description
- * -----------
- * Baht is a tool to help index websites.  It can download HTML, parse HTML,  
- * download images, follow redirects and much more.
- *
- * Example Usage is something like:
- * <pre>
- * $ baht -l <file> 
- * </pre>
- *
- * If no file is present, a profile can be built on the command line like:
- * <pre>
- * $ baht [ -f <file>, -u <url> ] -e "{ model = '...', type = '...' }"
- * </pre>
- *
- * Baht is a dumb robot, meaning that it you still have to tell it how to
- * handle whatever is coming back from the server.  The easiest way is to
- * write a Lua file defining which elements are most important on a page.
- * 
- * Baht works by using a string that resolves a certain part of the DOM, 
- * and retrieving that node.  Here is an example of a car page that is
- * indexed by an application I wrote:
- * <pre> 
-root = {
- origin= "div^backdrop.div^content_a.div^content_b.center"
-,start= "div^backdrop.div^content_a.div^content_b.center.div^thumb_div"
-,stop= "div^backdrop.div^content_a.div^content_b.center.br"
-}, 
+baht 
+====
 
-elements = {
- model= "div^thumb_div.table^thumb_table_a.tbkdy.tr.td^thumb_ymm.text"
-, year= "$( get first word?  can use Lua or something )"
-, make= "$( get middle word )"
-	-- More data is listed but you get the idea.
-  ...  
-}
- * </pre> 
- *
- * 
- * TODO
- * ----
-
- - either curl or single to make requests and return what came back
- - directory listing to pull multiple files or locations?
- - change hashing to use different level indicators (e.g. div[1,2] vs div)
+Summary
+-------
+A web scraper, which assists in building databases.
 
 
- - email when done
- - stream to db
- - add options 
- - test out hashes against the table with other types of markup
- - add a way to jump to a specific hash and do the search from there (easiest
-   way is to copy the table)
-	 Table *nt = lt_copybetween( Table tt, int start, int end );  
-	 free( tt );
- - add the option to read directly from memory (may save time)
- - add the option to read from hashes from text file (better than recompiling if
-   something goes wrong)
+Usage
+-----
+tbd
+
+
+Flags 
+-----
+-DDEBUG - Show debugging information 
+-DHASHTYPE_* - Compile with different hash schemes? 
+-DSEE_FRAMING * - Compile with the ability to see dumps of hashes
+
+
+Author
+------
+Antonio R. Collins II (ramar@tubularmodular.com, ramar.collins@gmail.com)
+Copyright: Tubular Modular Feb 9th, 2019
+Last Updated: Fri May 31 11:35:59 EDT 2019
+
+
+Description
+-----------
+Baht is a tool to help index websites.  It can download HTML, parse HTML,  
+download images, follow redirects and much more.
+
+Example Usage is something like:
+<pre>
+$ baht -l <file> 
+</pre>
+
+If no file is present, a profile can be built on the command line like:
+<pre>
+$ baht [ -f <file>, -u <url> ] -e "{ model = '...', type = '...' }"
+</pre>
+
+Baht is a dumb robot, meaning that it you still have to tell it how to
+handle whatever is coming back from the server.
+
+Baht works by using a string that resolves a certain part of the DOM, 
+and retrieving that node.  Here is an example of a car page that is
+indexed by an application I wrote:
+
+
+ 
+TODO
+----
+- exclude classes (or other dom objects).  Some sites use extra styling
+	that hurts being able to move through a template.
+
+
+Nice to Have
+-------------
+- add the option to read directly from memory (may save time)
+- add the option to read from hashes from text file (better than recompiling if
+ something goes wrong)
 
  * ---------------------------------------------- */
 #include "vendor/single.h"
 #include <gnutls/gnutls.h>
 #include <gumbo.h>
-//TODO: These headers should no longer exist in a future version
-//#include <curl/curl.h>
 
 #ifndef DEBUG
  #define RUN(c) (c)
@@ -1454,5 +1434,3 @@ destroy:
 
 	return died;
 }
-
-
