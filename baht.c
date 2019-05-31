@@ -552,6 +552,7 @@ int load_page ( const char *file, wwwResponse *w ) {
 	w->status = 200;
 	w->len = sb.st_size;
 	w->data = (uint8_t *)p;
+	w->body = (uint8_t *)p;
 	w->redirect_uri = NULL;
 	return 1;
 }
@@ -873,6 +874,13 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 	//Set refs
 	InnerProc *pi = (InnerProc *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
+#if 0
+if ( kt == LITE_TXT && vt == LITE_TXT ) {
+	fprintf(stderr, "%s -> %s\n", kv->key.v.vchar, kv->value.v.vchar );
+getchar();
+//return 1;
+}
+#endif
 
 	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
@@ -892,8 +900,14 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 		lt_addintvalue( pi->ctable, kv->value.v.vint );	
 	else if ( vt == LITE_BLB)
 		lt_addblobvalue( pi->ctable, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
-	else if ( vt == LITE_TXT )
-		lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
+	else if ( vt == LITE_TXT ) {
+		if ( kv->value.v.vchar )
+			lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
+		else {
+			//I wonder if this would work...
+			lt_addtextvalue( pi->ctable, "" );
+		}
+	}
 	else if ( vt == LITE_TBL ) {
 		//(*pi->level) ++;
 		//fprintf( stderr, "%p\n", &kv->value.v.vtable );
@@ -1759,12 +1773,14 @@ fprintf(stderr,"tmp: %s\n", tmp );
 
 		//TODO: Simplify this
 		Table *th = malloc( sizeof(Table) );
+		memset(th,0,sizeof(Table));
 		lt_init( th, NULL, 7777 );
 		ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
 		pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
 
 		//Create a new table
 		//TODO: Why -3?  
+//lt_dump(tHtml); exit(0);
 		lt_exec_complex( tHtml, start, end - 3, &pp, build_individual );
 		lt_lock( pp.ctable );
 
@@ -1778,6 +1794,7 @@ fprintf(stderr,"tmp: %s\n", tmp );
 			}
 		}
 	#endif
+getchar();
 	}
 
 	//Dump the processing structure after processing 
