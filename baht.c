@@ -1686,7 +1686,7 @@ fprintf(stderr,"tmp: %s\n", tmp );
 	if ( ky ) { //the check is useless, but keeps the code consistent
 		//print_yamlList( ky ); exit(0);
 		pp.root.fragment = find_in_yamlList( ky, "root_origin"	);
-		pp.jump.fragment = find_in_yamlList( ky, "root_start"	);
+		pp.jump.fragment = find_in_yamlList( ky, "jump_start"	);
 		//fprintf(stderr,"root: %s\njump: %s\n", pp.root.fragment, pp.jump.fragment );
 	}
 
@@ -1767,7 +1767,10 @@ fprintf(stderr,"tmp: %s\n", tmp );
 	for ( int i=0; i<pp.hlistLen; i++ ) {
 		int start = pp.hlist[ i ];
 		//int end = ( i+1 > pp.hlistLen ) ? tHtml->count : pp.hlist[ i+1 ]; 
-		int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
+		int end = ( i+1 == pp.hlistLen ) ? -1 : pp.hlist[ i+1 ]; 
+		//int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
+		if ( end == -1 ) break;
+//fprintf(stderr,"start+end: %d, %d\n", start, end );
 		//Create a table to track occurrences of hashes
 		build_ctck( tHtml, start, end - 1 ); 
 
@@ -1794,12 +1797,11 @@ fprintf(stderr,"tmp: %s\n", tmp );
 			}
 		}
 	#endif
-getchar();
 	}
 
 	//Dump the processing structure after processing 
 	print_innerproc( &pp );
-exit(0);
+
 	//Destroy the source table. 
 	lt_free( tHtml );
 
@@ -1823,11 +1825,12 @@ exit(0);
 		//I need to loop through the "block" and find each hash
 		yamlList **keys = find_keys_in_mt( tHtmllite, ky, &mtLen );
 	#if 0
-		print_yamllist( keys ); exit( 0 );
+		print_yamlList( keys ); exit( 0 );
 	#endif
 
 		//Then loop through matched keys and values
 		while ( (*keys)->k ) {
+			if ( (*keys)->v ) {
 		#if 0
 			expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
 			expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
@@ -1846,9 +1849,11 @@ exit(0);
 			//Add a comma
 			memcpy( &babuf[ baLen ], ", ", 2 );
 			memcpy( &vbuf[ vLen ], ", ", 2 );
-			keys++, baLen+= 2, vLen+= 2; 
+			baLen+= 2, vLen+= 2;
+			} 
 		#endif
-		} 
+			keys++; 
+		}
 
 		//Create a SQL creation string, if any hashes were found.
 		if ( mtLen > 1 ) {
