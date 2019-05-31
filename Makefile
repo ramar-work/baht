@@ -45,3 +45,10 @@ install:
 # uninstall - Install the tool somewhere
 uninstall:
 	printf ''
+
+
+# package
+pkg:
+	git archive --format tar.gz --prefix baht-$(VERSION)/ HEAD > /tmp/baht-$(VERSION).tar.gz
+
+
