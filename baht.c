@@ -236,6 +236,10 @@ int verbose = 0;
 //TODO: Obviously, multi-threading is not going to be very kind to this app.  Change this ASAP. 
 int died=0;
 
+//...
+int global_dump_html = 0;
+char *global_html_dump_file = NULL;
+
 //User-Agent
 const char ua[] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36";
 
@@ -486,6 +490,7 @@ const Filter filterSet[] = {
 , { "rstr" ,      rstr_filter }
 , { "mstr" ,      mstr_filter }
 , { "replace" ,   replace_filter }
+, { "lcase" ,     lcase_filter }
 , { "trim" ,      trim_filter }
 , { NULL }
 };
@@ -547,6 +552,7 @@ int load_page ( const char *file, wwwResponse *w ) {
 	w->status = 200;
 	w->len = sb.st_size;
 	w->data = (uint8_t *)p;
+	w->body = (uint8_t *)p;
 	w->redirect_uri = NULL;
 	return 1;
 }
@@ -712,6 +718,11 @@ Table *parse_html ( char *b, int len ) {
 
 	Table *tt = NULL;
 
+	if ( global_dump_html ) {
+		write( 1, b, len );
+		exit( 0 ); //TODO: Obviously, you need to destroy things...	
+	}
+
 	//We can loop through the Gumbo data structure and create a node list that way
 	GumboOutput *output = gumbo_parse_with_options( &kGumboDefaultOptions, (char *)b, len );
 	GumboVector *children = &(output->root)->v.element.children;
@@ -856,26 +867,13 @@ int build_ctck ( Table *tt, int start, int end ) {
 	return 1;
 }
 
+
 //Pass through and build a smaller subset of tables
 int build_individual ( LiteKv *kv, int i, void *p ) {
 
 	//Set refs
 	InnerProc *pi = (InnerProc *)p;
 	LiteType kt = kv->key.type, vt = kv->value.type;
-#if 0
-	if ( kt == LITE_TXT && vt == LITE_TXT ) { 
-		fprintf( stderr,"[%p] %s => %s ", kv, lt_typename( kt ), lt_typename( vt ) ); 
-		fprintf(stderr,"%ld => %ld\n", strlen( kv->key.v.vchar ), strlen( kv->value.v.vchar ) );
-		#if 0
-		fprintf(stderr,"%s => ", kv->key.v.vchar);
-		fprintf(stderr,"%s\n", kv->value.v.vchar);
-		#endif
-	}
-	//if ( kt == LITE_TXT ) fprintf(stderr,"%s\n",	
-	//if ( kt == LITE_TXT ) fprintf(stderr,"%s\n",	
-	return 1;
-	//fprintf( stderr,"%s => %s\n", kv->key.v.vchar, kv->value.v.vchar ); getchar();
-#endif
 
 	//Save key	
 	if ( kt == LITE_INT || kt == LITE_FLT ) 
@@ -895,8 +893,14 @@ int build_individual ( LiteKv *kv, int i, void *p ) {
 		lt_addintvalue( pi->ctable, kv->value.v.vint );	
 	else if ( vt == LITE_BLB )
 		lt_addblobvalue( pi->ctable, kv->value.v.vblob.blob, kv->value.v.vblob.size );	
-	else if ( vt == LITE_TXT )
-		lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
+	else if ( vt == LITE_TXT ) {
+		if ( kv->value.v.vchar )
+			lt_addtextvalue( pi->ctable, kv->value.v.vchar );	
+		else {
+			//I wonder if this would work...
+			lt_addtextvalue( pi->ctable, "" );
+		}
+	}
 	else if ( vt == LITE_TBL ) {
 		//(*pi->level) ++;
 		//fprintf( stderr, "%p\n", &kv->value.v.vtable );
@@ -1003,8 +1007,17 @@ void add_to_yamlList ( yamlList **y, const char *key, const char *value ) {
 }
 
 
-void find_in_yamlList ( yamlList **y, const char *key ) {
-	0;
+//Return the value associated with a specific key
+char *find_in_yamlList ( yamlList **y, const char *key ) {
+	yamlList **yy = y;	
+	while ( *yy && (*yy)->k ) {
+		//fprintf( stderr, "%s - %s\n", (*yy)->k, (*yy)->v );
+		if ( strcmp( key, (*yy)->k ) == 0 ) {
+			return (*yy)->v;
+		}
+		yy++;
+	}
+	return NULL;
 }
 
 void find_in_yamlset ( yamlSet *y, const char *key ) {
@@ -1336,6 +1349,7 @@ Option opts[] = {
 	//Most of this is for debugging	
 #ifdef SEE_FRAMING 
  ,{ "-k", "--show-full-key",    "Show a full key"  }
+ ,{ NULL, "--see-raw-html",     "Dump received HTML to file.", 's' }
  ,{ NULL, "--see-parsed-html",  "Dump the parsed HTML and stop." }
  ,{ NULL, "--see-parsed-lua",   "Dump the parsed Lua file and stop." }
  ,{ NULL, "--see-crude-frames", "Show the frames at first pass" }
@@ -1514,82 +1528,62 @@ int main( int argc, char *argv[] ) {
 				//TODO: This is ridiculous...
 				else {
 					const char *file = args[ i ];
-					char *p = NULL;
-#if 0
-					if ( !readFd( file, (uint8_t **)&p, NULL ) ) {
-						err_print( 0, "%s", "something bad happened at readFd." );
-						goto destroy;
-					}
-#else
-					struct stat sb = {0};
-					int fn = 0;
-	
-					//TODO: None of these should be fatal, but for ease they're going to be
-					//Read file to memory
-					if ( stat( file, &sb ) == -1 ) {
-						err_print( 0, "%s", strerror( errno ) );
+					char *p = NULL, *q = NULL;
+					int len = 0, qlen = 0;
+					if ( !readFd( file, (uint8_t **)&p, &len ) ) {
+						//err_print( 0, "%s", "something bad happened at readFd." );
+						err_print( 0, "%s", _errbuf  );
 						goto destroy;
 					}
 
-					//Open the file
-					if ( (fn = open( file, O_RDONLY )) == -1 ) {
-						err_print( 0, "%s", strerror( errno ) );
+					//TODO: Still not thread safe, fix this...
+					Mem mset;
+					memset(&mset,0,sizeof(Mem));
+				
+					//Allocate a new buffer... 
+					if ( !(q = malloc( len + 1 )) ) {
+						err_print( 0, "%s", "Malloc of new buffer failed...\n" );	
 						goto destroy;
 					}
-
-					//Allocate a buffer big enough to just write to memory.
-					if ( !(p = malloc( sb.st_size + 10 )) ) {
-						err_print( 0, "%s", strerror( errno ) );
-						goto destroy;
+				
+					//...and copy only uncommented values here...
+					memset( q, 0, len + 1 );
+					while ( strwalk( &mset, p, "\n" ) ) {
+						if ( *p == '#' && mset.pos == 0 )
+							continue;
+						if ( mset.chr == '\n' && p[mset.pos] == '#' )
+							continue;
+						if ( mset.chr == '\n' && p[mset.pos] == '\n' )
+							continue;
+						//write( 2, &p[mset.pos], mset.size );write( 2, "\n", 1 );
+						//TODO: this will probably cause a problem, mset.size + 1 needs a check
+						memcpy( &q[ qlen ], &p[mset.pos], mset.size + 1 );
+						qlen += mset.size + 1;
 					}
-	
-					memset(p,0,sb.st_size+10);	
-
-					//Read the file into buffer	
-					if ( read( fn, p, sb.st_size ) == -1 ) {
-						free( p );
-						err_print( 0, "%s", strerror( errno ) );
-						goto destroy;
-					}
-
-					//Close the file?
-					if ( close( fn ) == -1 ) {
-						free( p );
-						err_print( 0, "%s\n", strerror( errno ) );
-						goto destroy;
-					}
-#endif
-					tmp = p;
+					//write(2,q,qlen); write(2,"\n",1); exit(0);
+					//tmp = p;
+					tmp = q;
 				}
-		
-			#if 0
-				//always dump p when debugging
-				fprintf(stderr,"tmp:\n" ); fflush( stderr);
-				write( 2, tmp, strlen(tmp) );
-				fprintf(stderr,"\n" ); fflush( stderr);
-			#endif
 
 				//Now walk through the memory.
+				//write(2,tmp,strlen(tmp)); exit(0);
 				if ( tmp ) {
-#if 0
+				#if 0
 					strreplace( &tmp, "\n", "," );
 fprintf(stderr,"tmp: %s\n", tmp );
 					//string_to_yamlList( tmp, delims, NULL );
-#else
+				#else
 					//turn text blocks into continuous strings (get rid of \n and use ',')
 					char *ff = tmp;
 					while ( *ff ) { *ff = (*ff == '\n') ? ',' : *ff; ff++; }
 					//this could be U/B...
 					ff--, *ff = '\0';
 
-
-
 					Mem set; //TODO: This must not be / is not thread safe... fix it
 					int f=0; 
 					yamlList *tp = NULL;
 					memset(&set,0,sizeof(Mem));
 					
-				
 					while ( strwalk( &set, tmp, delims ) ) {
 						char buf[ 1024 ];
 						memset( &buf, 0, 1024 );
@@ -1606,7 +1600,7 @@ fprintf(stderr,"tmp: %s\n", tmp );
 							f = 0;
 						}
 					}
-#endif
+				#endif
 				}
 			}
 		}
@@ -1623,6 +1617,10 @@ fprintf(stderr,"tmp: %s\n", tmp );
 	}
 #endif
 
+
+	//Dump the nodelist and see if things are loading...
+	//print_yamllist( yy );
+
 	//Load the page from the web (or from file, but right now from web)
 	if ( pageType == PAGE_URL && !load_www( pageUrl, &www ) ) {
 		err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
@@ -1637,23 +1635,17 @@ fprintf(stderr,"tmp: %s\n", tmp );
 
 //print_www( &www );
 #if 0
-fprintf(stderr,"%s: %d\n", __FILE__, __LINE__ );
-print_ref( );
-fprintf(stderr,"%s: %d\n", __FILE__, __LINE__ );
-Ref *a = filter_ref( "source_url", NULL );
-fprintf( stderr, "%s\n", (char *)a->value );
-Ref *c = filter_ref( "download_dir", NULL );
-fprintf( stderr, "%s\n", c->value );
-exit( 0 );
-#endif
-
-
-#if 0
 	//Load the page via a command 
 	if ( !load_by_exec( pageUrl, &b, &blen, &www ) ) {
 		return err_print( 0, "Loading page at '%s' failed.\n", pageUrl );
 	}
 #endif
+
+	//Parse global HTML dump option and extract file as well
+	if ( opt_set( opts, "--see-raw-html" ) ) {
+		global_dump_html = 1;
+		global_html_dump_file = opt_get( opts, "--see-raw-html" ).s; 
+	}
 
 	//Create a hash table of all the HTML
 	if ( !(tHtml = parse_html( (char *)www.data, www.len )) ) {
@@ -1684,13 +1676,20 @@ exit( 0 );
 		pp.jump.fragment = lt_text( tYaml, "root.start" );
 	}
 
-	if ( opt_set( opts, "--rootstart" ) ) {
-		pp.root.fragment = opt_get( opts, "--rootstart" ).s; 
+	//Likewise, also try to load values from nodefiles
+	if ( ky ) { //the check is useless, but keeps the code consistent
+		//print_yamlList( ky ); exit(0);
+		pp.root.fragment = find_in_yamlList( ky, "root_origin"	);
+		pp.jump.fragment = find_in_yamlList( ky, "jump_start"	);
+		//fprintf(stderr,"root: %s\njump: %s\n", pp.root.fragment, pp.jump.fragment );
 	}
 
-	if ( opt_set( opts, "--jumpstart" ) ) {
+	//Then try checking command line opts for values
+	if ( opt_set( opts, "--rootstart" ) )
+		pp.root.fragment = opt_get( opts, "--rootstart" ).s; 
+
+	if ( opt_set( opts, "--jumpstart" ) )
 		pp.jump.fragment = opt_get( opts, "--jumpstart" ).s; 
-	}
 
 	#if 0
 	if ( opt_set( opts, "--framestart" ) ) {
@@ -1762,18 +1761,23 @@ exit( 0 );
 	for ( int i=0; i<pp.hlistLen; i++ ) {
 		int start = pp.hlist[ i ];
 		//int end = ( i+1 > pp.hlistLen ) ? tHtml->count : pp.hlist[ i+1 ]; 
-		int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
+		int end = ( i+1 == pp.hlistLen ) ? -1 : pp.hlist[ i+1 ]; 
+		//int end = ( i+1 == pp.hlistLen ) ? lt_countall( tHtml ) : pp.hlist[ i+1 ]; 
+		if ( end == -1 ) break;
+//fprintf(stderr,"start+end: %d, %d\n", start, end );
 		//Create a table to track occurrences of hashes
 		build_ctck( tHtml, start, end - 1 ); 
 
 		//TODO: Simplify this
 		Table *th = malloc( sizeof(Table) );
+		memset(th,0,sizeof(Table));
 		lt_init( th, NULL, 7777 );
 		ADD_ELEMENT( pp.tlist, pp.tlistLen, Table *, th );
 		pp.ctable = pp.tlist[ pp.tlistLen - 1 ];
 
 		//Create a new table
 		//TODO: Why -3?  
+//lt_dump(tHtml); exit(0);
 		lt_exec_complex( tHtml, start, end - 3, &pp, build_individual );
 		//exit(0);
 		lt_lock( pp.ctable );
@@ -1816,11 +1820,12 @@ exit( 0 );
 		//I need to loop through the "block" and find each hash
 		yamlList **keys = find_keys_in_mt( tHtmllite, ky, &mtLen );
 	#if 0
-		print_yamllist( keys ); exit( 0 );
+		print_yamlList( keys ); exit( 0 );
 	#endif
 
 		//Then loop through matched keys and values
 		while ( (*keys)->k ) {
+			if ( (*keys)->v ) {
 		#if 0
 			expandbuf( &babuf, &baLen, "%s, ", (*keys)->k );
 			expandbuf( &vbuf, &vLen, "\"%s\", ", (*keys)->v );
@@ -1839,9 +1844,11 @@ exit( 0 );
 			//Add a comma
 			memcpy( &babuf[ baLen ], ", ", 2 );
 			memcpy( &vbuf[ vLen ], ", ", 2 );
-			keys++, baLen+= 2, vLen+= 2; 
+			baLen+= 2, vLen+= 2;
+			} 
 		#endif
-		} 
+			keys++; 
+		}
 
 		//Create a SQL creation string, if any hashes were found.
 		if ( mtLen > 1 ) {
