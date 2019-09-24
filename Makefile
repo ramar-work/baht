@@ -65,3 +65,6 @@ pkg:
 	git archive --format tar.gz --prefix baht-$(VERSION)/ HEAD > /tmp/baht-$(VERSION).tar.gz
 
 
+# docs - Create index.html
+docs:
+	markdown -S README.md > index.html
